@@ -197,14 +197,14 @@ class GridDesignerApp:
         # clear
         for w in self.palette_frame.winfo_children():
             w.destroy()
-        tk.Label(self.palette_frame, text="Palette", bg="#0b1220", fg="#cfeefd", font=("Arial", 10, "bold")).pack(side=tk.LEFT, padx=8)
-        for tpl in self.templates:
+        
+        for idx, tpl in enumerate(self.templates):
             f = tk.Frame(self.palette_frame, width=120, height=60, bg="#061323", bd=0)
             f.pack_propagate(False)
-            f.pack(side=tk.LEFT, padx=6, pady=8)
+            f.pack(side=tk.LEFT, padx=11 if idx == 0 else 6, pady=8)
             inner = tk.Frame(f, bg=tpl.color)
             inner.pack(fill=tk.BOTH, expand=True)
-            lbl = tk.Label(inner, text=f"{tpl.name} ({tpl.w}x{tpl.h})", bg=tpl.color, fg="white")
+            lbl = tk.Label(inner, text=f"{tpl.name}", bg=tpl.color, fg="white", font=("Arial", 14, "bold"))
             lbl.pack(expand=True)
             # bind start drag
             inner.bind('<ButtonPress-1>', lambda e, t=tpl: self.on_palette_press(e, t))
