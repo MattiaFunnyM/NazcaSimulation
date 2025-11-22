@@ -210,6 +210,9 @@ class GridDesignerApp:
             inner.bind('<ButtonPress-1>', lambda e, t=tpl: self.on_palette_press(e, t))
             inner.bind('<B1-Motion>', lambda e, t=tpl: self.on_palette_motion(e, t))
             inner.bind('<ButtonRelease-1>', lambda e, t=tpl: self.on_palette_release(e, t))
+            lbl.bind('<ButtonPress-1>', lambda e, t=tpl: self.on_palette_press(e, t))
+            lbl.bind('<B1-Motion>', lambda e, t=tpl: self.on_palette_motion(e, t))
+            lbl.bind('<ButtonRelease-1>', lambda e, t=tpl: self.on_palette_release(e, t))
 
     # ----------------- event handlers -----------------
     def on_palette_press(self, event, template):
