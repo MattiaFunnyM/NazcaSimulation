@@ -25,9 +25,9 @@ import time
 # ---------------- CONFIG ----------------
 WINDOW_W = 700
 WINDOW_H = 600
-GRID_COLS = 16
-GRID_ROWS = 12
-CELL_SIZE = 40  # base cell size in pixels
+GRID_COLS = 100
+GRID_ROWS = 100
+CELL_SIZE = 8  # base cell size in pixels
 PALETTE_HEIGHT = 80
 SIDE_MENU_W = 160
 # ----------------------------------------
@@ -66,10 +66,10 @@ class PlacedBlock:
 
 # default palette
 DEFAULT_PALETTE = [
-    BlockTemplate("b_cpu", "Module A", 2, 1, "#06b6d4"),
-    BlockTemplate("b_gpu", "Module B", 1, 1, "#ef4444"),
-    BlockTemplate("b_mem", "Module C", 3, 1, "#f59e0b"),
-    BlockTemplate("b_io", "IO", 1, 2, "#10b981"),
+    BlockTemplate("b_cpu", "Module A", 16, 8, "#06b6d4"),
+    BlockTemplate("b_gpu", "Module B", 8, 8, "#ef4444"),
+    BlockTemplate("b_mem", "Module C", 32, 10, "#f59e0b"),
+    BlockTemplate("b_io", "IO", 6, 22, "#10b981"),
 ]
 
 class GridDesignerApp:
