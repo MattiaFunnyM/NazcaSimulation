@@ -184,7 +184,6 @@ class GridDesignerApp:
         w = pb.template.w * CELL_SIZE * self.zoom
         h = pb.template.h * CELL_SIZE * self.zoom
         rect = self.canvas.create_rectangle(x+2, y+2, x+w-2, y+h-2, fill=pb.template.color, outline="#0b0b0b", width=2)
-        txt = self.canvas.create_text(x+8, y+8, anchor='nw', text=pb.template.name, fill='white', font=("Arial", max(8, int(12*self.zoom)), "bold"))
         group = self.canvas.create_rectangle(0,0,0,0, outline="", fill="", tags=("group",))
         # We will use rect id as key; store mapping for interactions
         self.item_map[rect] = pb.uid
@@ -192,10 +191,7 @@ class GridDesignerApp:
         self.canvas.tag_bind(rect, '<ButtonPress-1>', lambda e, rid=rect: self.on_block_press(e, rid))
         self.canvas.tag_bind(rect, '<B1-Motion>', lambda e, rid=rect: self.on_block_motion(e, rid))
         self.canvas.tag_bind(rect, '<ButtonRelease-1>', lambda e, rid=rect: self.on_block_release(e, rid))
-        # Also bind text to same handlers
-        self.canvas.tag_bind(txt, '<ButtonPress-1>', lambda e, rid=rect: self.on_block_press(e, rid))
-        self.canvas.tag_bind(txt, '<B1-Motion>', lambda e, rid=rect: self.on_block_motion(e, rid))
-        self.canvas.tag_bind(txt, '<ButtonRelease-1>', lambda e, rid=rect: self.on_block_release(e, rid))
+ 
 
     def _draw_palette(self):
         # clear
