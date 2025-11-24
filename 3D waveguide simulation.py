@@ -40,9 +40,9 @@ source = mp.Source(
 #(-4, -4)                  (4, -4)
 
 # Define the waveguide geometry
-geometry = [mp.Block(mp.Vector3(8,1,1), # Size
+geometry = mp.Block(mp.Vector3(8,1,1), # Size
                      center=mp.Vector3(0, 0, 0), # Center position
-                     material=mp.Medium(epsilon=material_epsilon))]
+                     material=mp.Medium(epsilon=material_epsilon))
 
 #(-4, 4)                    (4, 4)
 #   ···#···#···#···#···#···#···#
@@ -60,6 +60,7 @@ pml_layers = [mp.PML(1.0)]  # Perfectly matched layer boundary conditions to avo
 sim = mp.Simulation(
     cell_size=cell_size,
     sources=[source],
+    geometry=[geometry],
     resolution=resolution,
     boundary_layers=pml_layers
 )
@@ -71,12 +72,8 @@ sim.run(until=200)
 eps_data = sim.get_array(center=mp.Vector3(0, 0, 0), 
                          size=cell_size, 
                          component=mp.Dielectric)
-plt.figure()
-plt.imshow(eps_data.transpose(), interpolation='spline36', cmap='binary')
-plt.axis('off')
-plt.show()
 
-# Add the electric field
+# And the electric field
 ez_data = sim.get_array(center=mp.Vector3(0, 0, 0), 
                         size=cell_size, 
                         component=mp.Ez)
