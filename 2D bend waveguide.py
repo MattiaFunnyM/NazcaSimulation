@@ -25,7 +25,8 @@ source_frequency = 0.1    # Frequency corresponding to the reference wavelength
 source = mp.Source(
     mp.ContinuousSource(frequency=source_frequency),  # Gaussian pulse
     component=mp.Ez,            
-    center=mp.Vector3(-7, -3.5, 0) # Leave a bit of space from the left boundary
+    center=mp.Vector3(-7, -3.5, 0), # Leave a bit of space from the left boundary
+    size=mp.Vector3(0, 1)           # Line source for better coupling
 )
 
 #(-25, 5)                    (25, 5)
@@ -70,7 +71,8 @@ sim = mp.Simulation(
 )
 
 # Run the simulation for 200 units
-sim.run(until=200)
+sim.run(mp.at_beginning(mp.output_epsilon), # We want to access structure only at the beginning,
+        until=200)
 
 # Visualize the geometry simulated
 eps_data = sim.get_array(center=mp.Vector3(0, 0, 0), 
