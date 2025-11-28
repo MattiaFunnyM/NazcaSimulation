@@ -7,9 +7,9 @@ import numpy as np
 # Simulation parameters
 # -----------------------------
 sim_length = 30
-sim_width = 10
+sim_width = 6
 sim_height = 0
-sim_resolution = 10
+sim_resolution = 15
 sim_time = 250
 sim_size = mp.Vector3(sim_length, sim_width, sim_height)
 
@@ -89,8 +89,10 @@ fig_fontsize = 16
 fig, axs = plt.subplots(2, 1, figsize=(10, 8), constrained_layout=True)
 
 # --- 1) Field propagation along waveguide ---
+axs[0].imshow(eps_data.T, extent=[x[0], x[-1], y[0], y[-1]],
+              interpolation='spline36', cmap='binary')
 im1 = axs[0].imshow(Ez.T, extent=[x[0], x[-1], y[0], y[-1]],
-                    origin='lower', cmap='RdBu', aspect='auto')
+                    origin='lower', cmap='RdBu', aspect='auto', alpha=0.8)
 axs[0].set_xlabel("x (µm)", fontsize=fig_fontsize)
 axs[0].set_ylabel("y (µm)",  fontsize=fig_fontsize)
 axs[0].set_title("Ez field propagation along waveguide",  fontsize=fig_fontsize)
@@ -101,9 +103,15 @@ cbar1.set_label("Ez amplitude")
 # --- 2) Mode cross-section at center (x=0) ---
 center_idx = Ez.shape[0] // 2
 Ez_cross = Ez[center_idx, :]
+Ez_cross_norm = Ez_cross/np.sqrt(np.sum(np.abs(Ez_cross)**2)) * np.sign(Ez_cross[int(len(Ez_cross)/2)])
 Ez_neff_cross = Ez_neff[center_idx, :]
+eps_cross = np.sqrt(eps_data[center_idx, :])
 neff = np.sqrt(np.sum(np.abs(Ez_neff_cross)**2)/np.sum(np.abs(Ez_cross)**2))
-im2 = axs[1].plot(y, Ez_cross, label=f"Mode (n_eff={neff:.2f})", color='blue')
+
+eps_background = np.tile(eps_cross, (200, 1))
+axs[1].imshow(eps_background, aspect='auto', extent=[y.min(), y.max(), Ez_cross_norm.min() - 0.1*Ez_cross_norm.max(), Ez_cross_norm.max() * 1.1],
+              origin='lower', cmap='viridis', alpha=0.7)
+axs[1].plot(y, Ez_cross_norm, label=f"Mode (n_eff={neff:.2f})", color='black', linewidth=2.5)
 axs[1].set_xlabel("y (µm)", fontsize=fig_fontsize)
 axs[1].set_ylabel("Ez amplitude", fontsize=fig_fontsize)
 axs[1].set_title("Waveguide mode cross-section", fontsize=fig_fontsize)
