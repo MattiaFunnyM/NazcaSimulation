@@ -11,8 +11,8 @@ import matplotlib.gridspec as gridspec
 sim_length = 30
 sim_width = 5
 sim_height = 0
-sim_resolution = 15
-sim_time = 200
+sim_resolution = 20
+sim_time = 2000
 sim_size = mp.Vector3(sim_length, sim_width, sim_height)
 
 # Waveguide geometry
@@ -55,9 +55,9 @@ geometry2 = [
     mp.Block(size=mp.Vector3(wvg_length, wvg_width, wvg_height),
             center=mp.Vector3(),
             material=mp.Medium(epsilon=wvg_neff**2)),
-    #mp.Block(size=mp.Vector3(mmi_length, mmi_width, mmi_height),
-    #        center=mp.Vector3(),
-    #        material=mp.Medium(epsilon=wvg_neff**2)),
+    mp.Block(size=mp.Vector3(mmi_length, mmi_width, mmi_height),
+            center=mp.Vector3(),
+            material=mp.Medium(epsilon=wvg_neff**2)),
 ]
 
 # Define the source for the mode calculation
@@ -89,7 +89,7 @@ sim.filename_prefix = filename_prefix1
 # Simulation - Mode calculation
 # -----------------------------
 # Prepare a dft to extract complex field component
-dft1 = sim.add_dft_fields([mp.Ez], src_freq, 0, 1, 
+dft1 = sim.add_dft_fields([mp.Ez, mp.Hy], src_freq, 0, 1, 
                           where=mp.Volume(center=mp.Vector3(),
                                           size=mp.Vector3(sim_length, sim_width, sim_height)))
 
@@ -99,12 +99,13 @@ sim.run(mp.at_beginning(mp.output_epsilon),
 
 # Extract complex field component
 Ez1 = sim.get_dft_array(dft1, mp.Ez, 0)
-
-# Find the maximum of the field
-min_idx_search = 50
+Hy1 = sim.get_dft_array(dft1, mp.Hy, 0)
 
 # Extract the cross section at that maxima (used for cross section and mode generation)
-Ez1_cross = np.real(Ez1[int((sim_length/2-1)*sim_resolution), :])
+x_max_index = np.unravel_index(np.argmax(np.real(Ez1)), Ez1.shape)[0]   # row
+Ez1_cross = np.real(Ez1[x_max_index, :])
+Hy1_cross = np.real(Hy1[x_max_index, :])
+
 
 # Reset simulation before starting new one
 sim.reset_meep()
@@ -118,22 +119,43 @@ Ez1_cross_interp = interp1d(
     bounds_error=False,
     fill_value=0.0
 )
+Hy1_cross_interp = interp1d(
+    y,
+    Hy1_cross,
+    kind='cubic',
+    bounds_error=False,
+    fill_value=0.0
+)
 
 # Define temporal and spatial evolution of the mode source
-def temporal_profile(t):
+def temporal_profile_Ez(t):
     return np.cos(2 * np.pi * src_freq * t)
 
-def spatial_profile(r):
+def spatial_profile_Ez(r):
     return float(Ez1_cross_interp(r.y))
 
+def temporal_profile_Hy(t):
+    return np.sin(2 * np.pi * src_freq * t)
+
+def spatial_profile_Hy(r):
+    return float(Hy1_cross_interp(r.y))
+
+
 # Define the source for the propagation simulation
-source2 = [mp.Source(
-    src=mp.CustomSource(temporal_profile),
+source2 = [
+    mp.Source(
+    src=mp.CustomSource(temporal_profile_Ez),
     center=mp.Vector3(-sim_length/2 + 1, 0),
     size=mp.Vector3(0, sim_width),
     component = mp.Ez,
-    amp_func = spatial_profile
-)]
+    amp_func = spatial_profile_Ez),
+    mp.Source(
+    src=mp.CustomSource(temporal_profile_Hy),
+    center=mp.Vector3(-sim_length/2 + 1, 0),
+    size=mp.Vector3(0, sim_width),
+    component = mp.Hy,
+    amp_func = spatial_profile_Hy)
+]
 
 # -----------------------------
 # Simulation setup - insert MMI
@@ -159,7 +181,8 @@ dft2 = sim2.add_dft_fields([mp.Ez], src_freq, 0, 1,
                                            size=mp.Vector3(sim_length, sim_width, sim_height)))
 
 # Physically run the simulation
-sim2.run(until=sim_time)
+sim2.run(mp.at_beginning(mp.output_epsilon),
+         until=sim_time)
 
 # Extract complex field component
 Ez2 = sim2.get_dft_array(dft2, mp.Ez, 0)
@@ -170,6 +193,8 @@ Ez2 = sim2.get_dft_array(dft2, mp.Ez, 0)
 # Load the generated file for material from 1st simulation 
 with h5py.File("Output/" + filename_prefix1 + '-eps-000000.00.h5', "r") as f: 
     eps_data1 = f["eps"][:]
+with h5py.File("Output/" + filename_prefix2 + '-eps-000000.00.h5', "r") as f: 
+    eps_data2 = f["eps"][:]
 
 # Transpose the field
 Ez1 = Ez1.T
@@ -183,7 +208,7 @@ plt_fontsize = 16
 fig = plt.figure(figsize=(14, 8))
 
 # Create a 2x2 grid with different column widths
-gs = gridspec.GridSpec(2, 2, width_ratios=[3, 1], height_ratios=[1, 1], wspace=0.3, hspace=0.3)
+gs = gridspec.GridSpec(2, 2, width_ratios=[1.8, 1], height_ratios=[1, 1], wspace=0.3, hspace=0.5)
 
 # Axes
 ax1 = fig.add_subplot(gs[0, 0])  # Top-left (big)
@@ -201,7 +226,7 @@ y = np.linspace(-sim_width/2, sim_width/2, Ez1.shape[0])
 ax1.imshow(-eps_data1.T, cmap='gray', origin='upper', extent=[x[0], x[-1], y[0], y[-1]])
 im1 = ax1.imshow(np.abs(Ez1)**2, cmap='RdBu', alpha=0.8, origin='upper', 
                  interpolation='bilinear', vmin=-1, vmax=1, extent=[x[0], x[-1], y[0], y[-1]])
-ax1.set_title("Simulation 1", fontsize=plt_fontsize)
+ax1.set_title("Determine Mode", fontsize=plt_fontsize)
 ax1.set_xlabel("x (µm)", fontsize=plt_fontsize)
 ax1.set_ylabel("y (µm)", fontsize=plt_fontsize)
 ax1.tick_params(axis='both', which='major', labelsize=plt_fontsize) 
@@ -209,10 +234,10 @@ ax1.tick_params(axis='both', which='major', labelsize=plt_fontsize)
 # -----------------------------
 # Simulation 2 field (big)
 # -----------------------------
-ax3.imshow(-eps_data1.T, cmap='gray', origin='upper', extent=[x[0], x[-1], y[0], y[-1]])
+ax3.imshow(-eps_data2.T, cmap='gray', origin='upper', extent=[x[0], x[-1], y[0], y[-1]])
 im2 = ax3.imshow(np.abs(Ez2)**2, cmap='RdBu', alpha=0.8, origin='upper',
                  interpolation='bilinear', vmin=-1, vmax=1, extent=[x[0], x[-1], y[0], y[-1]])
-ax3.set_title("Simulation 2", fontsize=plt_fontsize)
+ax3.set_title("Mode Propagation", fontsize=plt_fontsize)
 ax3.set_xlabel("x (µm)", fontsize=plt_fontsize)
 ax3.set_ylabel("y (µm)", fontsize=plt_fontsize)
 ax3.tick_params(axis='both', which='major', labelsize=plt_fontsize) 
@@ -221,21 +246,21 @@ ax3.tick_params(axis='both', which='major', labelsize=plt_fontsize)
 # -----------------------------
 overlap = np.abs(np.dot(Ez1_cross, Ez1))
 overlap /= max(overlap)
-ax2.plot(x, overlap, color='red', lw=2)
+ax2.plot(x, overlap, color='black', lw=2)
 ax2.set_title("Ez1 Overlap", fontsize=plt_fontsize)
 ax2.set_xlabel("y (µm)", fontsize=plt_fontsize)
 ax2.set_ylabel("Overlap", fontsize=plt_fontsize)
 ax2.tick_params(axis='both', which='major', labelsize=plt_fontsize) 
-
+ax2.grid()
 # -----------------------------
 # Extra plot 2 - Ez2 cross-section
 # -----------------------------
 overlap = np.abs(np.dot(Ez1_cross, Ez2))
 overlap /= max(overlap)
-ax4.plot(x, overlap, color='red', lw=2)
+ax4.plot(x, overlap, color='black', lw=2)
 ax4.set_title("Ez2 Overlap", fontsize=plt_fontsize)
 ax4.set_xlabel("y (µm)", fontsize=plt_fontsize)
 ax4.set_ylabel("Overlap", fontsize=plt_fontsize)
 ax4.tick_params(axis='both', which='major', labelsize=plt_fontsize) 
-
+ax4.grid()
 plt.show()
