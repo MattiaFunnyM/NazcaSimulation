@@ -16,7 +16,6 @@ cld_height = 0
 
 # Waveguide geometry
 wvg_length = cld_length
-wvg_width = 1
 wvg_height = 0
 cld_neff = 1.72
 wvg_neff = 3.21
@@ -25,29 +24,30 @@ wvg_neff = 3.21
 src_wvl = 1.550
 src_freq = 1 / src_wvl
 
-# Geometry for mode calculation: a straight waveguide surrounded by FIL material 
-geometry = [
-    mp.Block(size=mp.Vector3(cld_length, cld_width, cld_height),
-            center=mp.Vector3(),
-            material=mp.Medium(epsilon=cld_neff**2)),
-    mp.Block(size=mp.Vector3(wvg_length, wvg_width, wvg_height),
-            center=mp.Vector3(),
-            material=mp.Medium(epsilon=wvg_neff**2)),
-]
+plt.figure()
 
-# -----------------------------
-# Simulation Extraction
-# -----------------------------
-Ez1_cross, Hy1_cross = SL.finding_mode_from_geometry(geometry,
-                                                   frequency=src_freq,
-                                                   resolution=20)
+# Geometry for mode calculation: a straight waveguide (different width) surrounded by FIL material o
+for wvg_width in [0.5, 0.75, 1.00, 1.25]:
+    
+    geometry = [
+        mp.Block(size=mp.Vector3(cld_length, cld_width, cld_height),
+                center=mp.Vector3(),
+                material=mp.Medium(epsilon=cld_neff**2)),
+        mp.Block(size=mp.Vector3(wvg_length, wvg_width, wvg_height),
+                center=mp.Vector3(),
+                material=mp.Medium(epsilon=wvg_neff**2)),
+    ]
 
-Ez2_cross, Hy2_cross = SL.finding_mode_from_geometry(geometry,
-                                                   frequency=src_freq,
-                                                   resolution=50)
+    # -----------------------------
+    # Simulation Extraction
+    # -----------------------------
+    Ez1_cross, Hy1_cross, neff = SL.finding_mode_from_geometry(geometry,
+                                                               frequency=src_freq)
 
-plt.plot(np.linspace(0, 1, len(Ez1_cross)), Ez1_cross, label='1')
-plt.plot(np.linspace(0, 1, len(Ez2_cross)), Ez2_cross, label='2')
+    # Add plot profile
+    plt.plot(np.linspace(-cld_width/2, cld_width/2, len(Ez1_cross)), Ez1_cross, label=f'width {wvg_width}: neff {neff:.3f}' )
+
+# Show the plot
 plt.grid()
 plt.legend()
 plt.show()
