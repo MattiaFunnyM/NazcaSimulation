@@ -41,9 +41,9 @@ geometry = [
 # -----------------------------
 # Simulation Extraction
 # -----------------------------
-mode_already_solved = True
+mode_already_solved = False
 if not mode_already_solved:
-        Ez1_cross, Hy1_cross, neff = SL.finding_mode_from_geometry(geometry, 
+        Ez1_cross, Hy1_cross, neff = finding_mode_from_geometry(geometry, 
                                                                 frequency=src_freq,
                                                                 mode=1,
                                                                 resolution=20)
@@ -69,12 +69,12 @@ else:
         cross_axis = np.array(data["cross_axis"])
 
 # Creat a source from the mode fields
-wvg_length2 = 200
-cld_length2 = 200
+wvg_length2 = 50
+cld_length2 = 50
 source = SL.generate_modal_source(Ez_cross = Ez1_cross,
                                   Hy_cross = Hy1_cross,
                                   cross_axis = np.linspace(-cld_width/2, cld_width/2, len(Ez1_cross)),
-                                  src_position = mp.Vector3(-cld_length2 / 2 + pml_thickness, 0.4),
+                                  src_position = mp.Vector3(-cld_length2 / 2 + pml_thickness, 0),
                                   src_size=mp.Vector3(0, cld_width),
                                   frequency=src_freq)
 
@@ -83,10 +83,7 @@ geometry = [
                 center=mp.Vector3(),
                 material=mp.Medium(epsilon=cld_neff**2)),
         mp.Block(size=mp.Vector3(wvg_length2, wvg_width, wvg_height),
-                center=mp.Vector3(0, 0.4, 0),
-                material=mp.Medium(epsilon=wvg_neff**2)),
-        mp.Block(size=mp.Vector3(wvg_length2, wvg_width, wvg_height),
-                center=mp.Vector3(0, -0.4, 0),
+                center=mp.Vector3(0, 0),
                 material=mp.Medium(epsilon=wvg_neff**2))]
 cell_size, cell_center = SL.compute_geometry_bounds(geometry)
 
@@ -99,6 +96,11 @@ sim = mp.Simulation(
     boundary_layers=pml_layers
 )
 
+# Define DFT fields to be recorded
+dft = sim.add_dft_fields([mp.Ez, mp.Hy], src_freq, 0, 1, 
+                             where=mp.Volume(center=mp.Vector3(),
+                                             size=cell_size))
+
 # Run the simulation for 200 units
 sim.run(until=wvg_length2*4)
 
@@ -107,16 +109,25 @@ eps_data = sim.get_array(center=mp.Vector3(0, 0, 0),
                          size=cell_size, 
                          component=mp.Dielectric)
 
-# And the electric field
-ez_data = sim.get_array(center=mp.Vector3(0, 0, 0), 
-                        size=cell_size, 
-                        component=mp.Ez)
+# Extract the fields at the DFT region
+ez_data = sim.get_dft_array(dft, mp.Ez, 0)
+hy_data = sim.get_dft_array(dft, mp.Hy, 0)
+
+
 plt.figure()
 plt.imshow(eps_data.transpose(), interpolation='spline36', cmap='binary', aspect='auto')
-plt.imshow(ez_data.transpose(), interpolation='spline36', cmap='RdBu', alpha=0.9, aspect='auto')
+plt.imshow(abs(ez_data).transpose(), interpolation='spline36', cmap='RdBu', alpha=0.9, aspect='auto')
 plt.axis('off')
 plt.show()
 
+overlap = 0.5 * np.sum(np.abs(Ez1_cross * np.conj(hy_data) + Hy1_cross * np.conj(ez_data)), axis=1)
+mode_norm = np.sqrt(np.abs(np.sum((Ez1_cross * np.conj(Hy1_cross)))))
+flat_index = np.argmax(np.real(ez_data))
+x_max_index, _ = np.unravel_index(flat_index, ez_data.shape)
+field_norm = np.sqrt(np.abs(np.sum((ez_data[x_max_index] * np.conj(hy_data[x_max_index])))))
+overlap_norm = abs(overlap / mode_norm / field_norm)
+plt.plot(overlap_norm)
+plt.show()
 # > CALCULATE OVERLAP WITH MODE
 # > CALCULATE BEND GEOMETRY
 # > VISUALIZE MODE, PROP... in one plot
