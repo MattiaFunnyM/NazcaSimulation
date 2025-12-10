@@ -172,7 +172,7 @@ def finding_mode_from_geometry(geometry, mode=1, frequency=1, resolution=20, tim
 
     # Normalization by ratio to pass from np.real to np.abs
     Ez1_cross_norm *= np.max(np.abs(Ez1_cross)) / np.max(np.real(Ez1_cross))
-    Hy1_cross_norm *= np.max(np.abs(Hy1_cross)) / np.max(np.real(Hy1_cross))
+    Hy1_cross_norm *= np.max(np.abs(Ez1_cross)) / np.max(np.real(Ez1_cross))
     
     # Get the material profile distribtuion
     eps_data = sim.get_array(
@@ -274,55 +274,5 @@ def generate_modal_source(Ez_cross, Hy_cross, cross_axis, src_position, src_size
     return source
 
 
-def save_mode_data(Ez_cross, Hy_cross, neff, filename):
-    """
-    Save mode calculation results (Ez, Hy, and neff) to an HDF5 file.
-    
-    Parameters
-    ----------
-    Ez_cross : np.ndarray
-        Electric field component along the cross-section
-    Hy_cross : np.ndarray
-        Magnetic field component along the cross-section
-    neff : float
-        Effective refractive index of the mode
-    filename : str
-        Path to the output HDF5 file
-    """
-    import h5py
-    
-    with h5py.File(filename, 'w') as f:
-        f.create_dataset('Ez_cross', data=Ez_cross)
-        f.create_dataset('Hy_cross', data=Hy_cross)
-        f.create_dataset('neff', data=neff)
-    
-    print(f"Mode data saved to {filename}")
-
-
-def load_mode_data(filename):
-    """
-    Load mode calculation results from an HDF5 file.
-    
-    Parameters
-    ----------
-    filename : str
-        Path to the HDF5 file containing mode data
-    
-    Returns
-    -------
-    Ez_cross : np.ndarray
-        Electric field component along the cross-section
-    Hy_cross : np.ndarray
-        Magnetic field component along the cross-section
-    neff : float
-        Effective refractive index of the mode
-    """
-    import h5py
-    
-    with h5py.File(filename, 'r') as f:
-        Ez_cross = f['Ez_cross'][:]
-        Hy_cross = f['Hy_cross'][:]
-        neff = f['neff'][()]  # [()] extracts scalar value from dataset
-    
-    print(f"Mode data loaded from {filename}")
-    return Ez_cross, Hy_cross, neff
+def calculate_modal_overlap(Ez_cross, Hz_cross, Ez_field, Hz_field):
+    overlap = (Ez_cross * np.conj(Hz_field) + Hz_cross * np.conj(Ez_field)) / (Ez_cross * Hz_cross) / (Ez_field * Hz_field)
