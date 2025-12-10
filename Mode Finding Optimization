@@ -1,3 +1,4 @@
+import json
 import meep as mp
 import numpy as np 
 import matplotlib.pyplot as plt
@@ -11,13 +12,13 @@ sim_time = 200
 
 # Cladding geometry
 cld_length = 5
-cld_width = 6
+cld_width = 5
 cld_height = 0
 
 # Waveguide geometry
 wvg_length = cld_length
 wvg_height = 0
-wvg_width = 1
+wvg_width = 0.4
 cld_neff = 1.72
 wvg_neff = 3.21
 
@@ -25,6 +26,10 @@ wvg_neff = 3.21
 src_wvl = 1.550
 src_freq = 1 / src_wvl
 
+# Boundary conditions
+pml_thickness = 1.0
+
+# Geometry definition
 geometry = [
         mp.Block(size=mp.Vector3(cld_length, cld_width, cld_height),
                 center=mp.Vector3(),
@@ -33,28 +38,85 @@ geometry = [
                 center=mp.Vector3(),
                 material=mp.Medium(epsilon=wvg_neff**2))]
 
+# -----------------------------
+# Simulation Extraction
+# -----------------------------
+mode_already_solved = True
+if not mode_already_solved:
+        Ez1_cross, Hy1_cross, neff = SL.finding_mode_from_geometry(geometry, 
+                                                                frequency=src_freq,
+                                                                mode=1,
+                                                                resolution=20)
+
+        cross_axis = np.linspace(-cld_width/2, cld_width/2, len(Ez1_cross))
+
+        data = {
+        "Ez": Ez1_cross.tolist(),
+        "Hy": Hy1_cross.tolist(),
+        "neff": float(neff),
+        "cross_axis": cross_axis.tolist()
+        }
+
+        with open("Output/Mode_ex1.json", "w") as f:
+                json.dump(data, f)
+else:
+        with open("Output/Mode_ex1.json") as f:
+                data = json.load(f)
+
+        Ez1_cross = np.array(data["Ez"])
+        Hy1_cross = np.array(data["Hy"])
+        neff = data["neff"]
+        cross_axis = np.array(data["cross_axis"])
+
+# Creat a source from the mode fields
+wvg_length2 = 200
+cld_length2 = 200
+source = SL.generate_modal_source(Ez_cross = Ez1_cross,
+                                  Hy_cross = Hy1_cross,
+                                  cross_axis = np.linspace(-cld_width/2, cld_width/2, len(Ez1_cross)),
+                                  src_position = mp.Vector3(-cld_length2 / 2 + pml_thickness, 0.4),
+                                  src_size=mp.Vector3(0, cld_width),
+                                  frequency=src_freq)
+
+geometry = [
+        mp.Block(size=mp.Vector3(cld_length2, cld_width, cld_height),
+                center=mp.Vector3(),
+                material=mp.Medium(epsilon=cld_neff**2)),
+        mp.Block(size=mp.Vector3(wvg_length2, wvg_width, wvg_height),
+                center=mp.Vector3(0, 0.4, 0),
+                material=mp.Medium(epsilon=wvg_neff**2)),
+        mp.Block(size=mp.Vector3(wvg_length2, wvg_width, wvg_height),
+                center=mp.Vector3(0, -0.4, 0),
+                material=mp.Medium(epsilon=wvg_neff**2))]
+cell_size, cell_center = SL.compute_geometry_bounds(geometry)
+
+pml_layers = [mp.PML(pml_thickness)]
+sim = mp.Simulation(
+    cell_size=cell_size,
+    sources=source,
+    geometry=geometry,
+    resolution=20,
+    boundary_layers=pml_layers
+)
+
+# Run the simulation for 200 units
+sim.run(until=wvg_length2*4)
+
+# Visualize the geometry simulated
+eps_data = sim.get_array(center=mp.Vector3(0, 0, 0), 
+                         size=cell_size, 
+                         component=mp.Dielectric)
+
+# And the electric field
+ez_data = sim.get_array(center=mp.Vector3(0, 0, 0), 
+                        size=cell_size, 
+                        component=mp.Ez)
 plt.figure()
-
-# Geometry for mode calculation: a straight waveguide (different width) surrounded by FIL material o
-for mode in [1, 2, 3]:
-    
-    # -----------------------------
-    # Simulation Extraction
-    # -----------------------------
-    Ez1_cross, Hy1_cross, neff = SL.finding_mode_from_geometry(geometry,
-                                                            frequency=src_freq,
-                                                            mode=mode,
-                                                            resolution=40)
-
-    # Add plot profile
-    plt.plot(np.linspace(-cld_width/2, cld_width/2, len(Ez1_cross)), Ez1_cross, label=f'mode {mode}: neff {neff:.3f}' )
-
-# Show the plot
-plt.grid()
-plt.legend()
+plt.imshow(eps_data.transpose(), interpolation='spline36', cmap='binary', aspect='auto')
+plt.imshow(ez_data.transpose(), interpolation='spline36', cmap='RdBu', alpha=0.9, aspect='auto')
+plt.axis('off')
 plt.show()
 
-# > CREATE A SOURCE FROM THE MODE
-# > SIMULATE A 2D BEND
-# > SIMULATE A 2D COUPLER
-# > SIMULATE A 3D STRUCTURE
+# > CALCULATE OVERLAP WITH MODE
+# > CALCULATE BEND GEOMETRY
+# > VISUALIZE MODE, PROP... in one plot
