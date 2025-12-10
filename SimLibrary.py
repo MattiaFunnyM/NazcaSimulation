@@ -1,9 +1,33 @@
 import meep as mp
 import numpy as np
+from scipy.interpolate import interp1d
 
 def compute_geometry_bounds(geometry_list):
     """
-    Given the Meep geometry list, compute the bounding box that contains all objects.
+    Compute the bounding box that contains all objects in a Meep geometry list.
+
+    This function calculates the smallest rectangular prism (bounding box) 
+    that fully encloses all the objects in the provided Meep geometry list. 
+    It returns both the size and the center of the bounding box.
+
+    Parameters
+    ----------
+    geometry_list : list of mp.GeometricObject
+        List of Meep geometric objects (e.g., blocks, cylinders) to include 
+        in the bounding box calculation.
+
+    Returns
+    -------
+    bounding_size : mp.Vector3
+        Size of the bounding box along each axis (x, y, z).
+    bounding_center : mp.Vector3
+        Center position of the bounding box.
+
+    Notes
+    -----
+    - Each object's size and center are used to determine the minimum and maximum 
+      extents along each axis.
+    - The resulting bounding box is axis-aligned.
     """
    
     # Init bounds with infinities
@@ -43,12 +67,44 @@ def compute_geometry_bounds(geometry_list):
 
 def finding_mode_from_geometry(geometry, mode=1, frequency=1, resolution=20, time=50):
     """
-    This function generates the Ez and Hy field cross sections 
-    for the TE modes of specified mode order of the geometry in input.
-    The mode is calculates at the specified frequency.
-    The precision of the simulation is determined by the resolution parameter.
-    The simulations runs for the specified time.
+    Compute the TE mode fields for a given geometry in a Meep simulation.
+
+    This function calculates the cross-sectional profiles of the electric (Ez) 
+    and magnetic (Hy) fields for a specified TE mode order. The fields are 
+    computed at a given frequency, using a simulation with specified spatial 
+    resolution and run time.
+
+    Parameters
+    ----------
+    geometry : list of mp.GeometricObject
+        The geometry of the simulation region (e.g., blocks, cylinders, etc.).
+    mode : int, optional
+        Mode order to compute (default is 1).
+    frequency : float, optional
+        Frequency at which to calculate the mode (default is 1).
+    resolution : int, optional
+        Spatial resolution of the simulation (default is 20).
+    time : float, optional
+        Total simulation time (in Meep time units) (default is 50).
+
+    Returns
+    -------
+    Ez_cross_norm : np.ndarray
+        Normalized electric field cross section along the y-axis.
+    Hy_cross_norm : np.ndarray
+        Normalized magnetic field cross section along the y-axis.
+    neff : float
+        Effective refractive index of the mode.
+
+    Notes
+    -----
+    - The simulation uses a PML boundary with thickness 1.0.
+    - The source is an eigenmode source centered at the left edge of the simulation cell.
+    - Cross sections are taken at the x-coordinate where Ez reaches its maximum.
+    - Fields are normalized to the total optical power of the mode.
+    - The effective index is computed from the normalized field and material distribution.
     """
+
     
     # Simulation boundary from geometry
     sim_size, sim_center = compute_geometry_bounds(geometry)
@@ -133,3 +189,140 @@ def finding_mode_from_geometry(geometry, mode=1, frequency=1, resolution=20, tim
                    
     # Return the field cross section 
     return Ez1_cross_norm, Hy1_cross_norm, neff
+
+def generate_modal_source(Ez_cross, Hy_cross, cross_axis, src_position, src_size, frequency=1):
+    """
+    Create a custom Meep source that generates an electromagnetic mode with specified 
+    electric and magnetic field profiles along a given cross-sectional axis.
+
+    Parameters
+    ----------
+    Ez_cross : array-like
+        Electric field (Ez) profile along the cross-sectional axis.
+    Hy_cross : array-like
+        Magnetic field (Hy) profile along the cross-sectional axis.
+    cross_axis : array-like
+        Coordinates corresponding to the cross-sectional profiles (e.g., y-axis positions).
+    src_position : mp.Vector3
+        Position of the source in the simulation domain.
+    src_size : mp.Vector3
+        Spatial extent of the source.
+    frequency : float, optional
+        Oscillation frequency of the source (default is 1).
+
+    Returns
+    -------
+    list of mp.Source
+        A list containing the Meep sources for the Ez and Hy components, 
+        with spatial profiles defined by interpolation of the provided cross sections 
+        and temporal profiles as harmonic oscillations at the specified frequency.
+
+    Notes
+    -----
+    - The Ez field is interpolated along the cross_axis to define its spatial dependence.
+    - The Hy field is interpolated similarly.
+    - Temporal profiles are sinusoidal: Ez ~ cos(2πft), Hy ~ sin(2πft).
+    - Intended for use in simulations where both electric and magnetic field components
+      of a mode are needed.
+    """
+
+    # Electric field cross section in z direction
+    Ez_function = interp1d(
+        cross_axis,
+        Ez_cross,
+        kind='cubic',
+        bounds_error=False,
+        fill_value=0.0
+    )
+    # Magnetic field cross section in y direction
+    Hy_function = interp1d(
+        cross_axis,
+        Hy_cross,
+        kind='cubic',
+        bounds_error=False,
+        fill_value=0.0
+    )
+
+    # The temporal dependence is an harmonic oscillation at the specified frequency
+    def temporal_profile_Ez(t):
+        return np.cos(2 * np.pi * frequency * t)
+
+    def temporal_profile_Hy(t):
+        return np.sin(2 * np.pi * frequency * t)
+    
+    # The spatial dependence is an interpolation of the mode cross section
+    def spatial_profile_Ez(r):
+        return float(Ez_function(r.y))
+
+    def spatial_profile_Hy(r):
+        return float(Hy_function(r.y))
+    
+    # Generate a Meep source with electric and magnetic components
+    source = [mp.Source(
+    src=mp.CustomSource(temporal_profile_Ez),
+    center=src_position,
+    size=src_size,
+    component = mp.Ez,
+    amp_func = spatial_profile_Ez),
+    mp.Source(
+    src=mp.CustomSource(temporal_profile_Hy),
+    center=src_position,
+    size=src_size,
+    component = mp.Hy,
+    amp_func = spatial_profile_Hy)]
+
+    return source
+
+
+def save_mode_data(Ez_cross, Hy_cross, neff, filename):
+    """
+    Save mode calculation results (Ez, Hy, and neff) to an HDF5 file.
+    
+    Parameters
+    ----------
+    Ez_cross : np.ndarray
+        Electric field component along the cross-section
+    Hy_cross : np.ndarray
+        Magnetic field component along the cross-section
+    neff : float
+        Effective refractive index of the mode
+    filename : str
+        Path to the output HDF5 file
+    """
+    import h5py
+    
+    with h5py.File(filename, 'w') as f:
+        f.create_dataset('Ez_cross', data=Ez_cross)
+        f.create_dataset('Hy_cross', data=Hy_cross)
+        f.create_dataset('neff', data=neff)
+    
+    print(f"Mode data saved to {filename}")
+
+
+def load_mode_data(filename):
+    """
+    Load mode calculation results from an HDF5 file.
+    
+    Parameters
+    ----------
+    filename : str
+        Path to the HDF5 file containing mode data
+    
+    Returns
+    -------
+    Ez_cross : np.ndarray
+        Electric field component along the cross-section
+    Hy_cross : np.ndarray
+        Magnetic field component along the cross-section
+    neff : float
+        Effective refractive index of the mode
+    """
+    import h5py
+    
+    with h5py.File(filename, 'r') as f:
+        Ez_cross = f['Ez_cross'][:]
+        Hy_cross = f['Hy_cross'][:]
+        neff = f['neff'][()]  # [()] extracts scalar value from dataset
+    
+    print(f"Mode data loaded from {filename}")
+    return Ez_cross, Hy_cross, neff
