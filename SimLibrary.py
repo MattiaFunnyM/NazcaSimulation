@@ -190,7 +190,7 @@ def finding_mode_from_geometry(geometry, mode=1, frequency=1, resolution=20, tim
     # Return the field cross section 
     return Ez1_cross_norm, Hy1_cross_norm, neff
 
-def generate_modal_source(Ez_cross, Hy_cross, cross_axis, src_position, src_size, frequency=1):
+def generate_modal_source(Ez_cross, Hy_cross, cross_axis, src_position, src_size, src_decay, frequency=1):
     """
     Create a custom Meep source that generates an electromagnetic mode with specified 
     electric and magnetic field profiles along a given cross-sectional axis.
@@ -207,6 +207,8 @@ def generate_modal_source(Ez_cross, Hy_cross, cross_axis, src_position, src_size
         Position of the source in the simulation domain.
     src_size : mp.Vector3
         Spatial extent of the source.
+    src_decay : float
+        Amount of radiant after which the source amplitude is switched off.
     frequency : float, optional
         Oscillation frequency of the source (default is 1).
 
@@ -245,9 +247,13 @@ def generate_modal_source(Ez_cross, Hy_cross, cross_axis, src_position, src_size
 
     # The temporal dependence is an harmonic oscillation at the specified frequency
     def temporal_profile_Ez(t):
-        return np.cos(2 * np.pi * frequency * t)
-
+        if frequency * t > src_decay:
+            return 0
+        return np.cos(2 * np.pi * frequency * t) 
+    
     def temporal_profile_Hy(t):
+        if frequency * t > src_decay:
+            return 0
         return np.sin(2 * np.pi * frequency * t)
     
     # The spatial dependence is an interpolation of the mode cross section
