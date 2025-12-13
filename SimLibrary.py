@@ -274,5 +274,93 @@ def generate_modal_source(Ez_cross, Hy_cross, cross_axis, src_position, src_size
     return source
 
 
-def calculate_modal_overlap(Ez_cross, Hz_cross, Ez_field, Hz_field):
-    overlap = (Ez_cross * np.conj(Hz_field) + Hz_cross * np.conj(Ez_field)) / (Ez_cross * Hz_cross) / (Ez_field * Hz_field)
+def calculate_modal_overlap(Ez_cross, Hy_cross, Ez_field, Hy_field, cross_axis=None, field_axis=None):
+    """
+    Compute the normalized modal overlap between a guided-mode cross section and 
+    the electromagnetic fields obtained from a simulation.
+
+    Parameters
+    ----------
+    Ez_cross : array-like
+        Electric field (Ez) profile of the mode along the cross section.
+    Hy_cross : array-like
+        Magnetic field (Hy) profile of the mode along the cross section.
+    Ez_field : array-like
+        Electric field (Ez) distribution from the simulation domain. Must have a 
+        compatible shape with Hy_field for element-wise multiplication.
+    Hy_field : array-like
+        Magnetic field (Hy) distribution from the simulation domain.
+    cross_axis : array like
+        coordinates where Ez_cross and Hy_cross are defined.
+        If None, assumes same as field_axis.
+    field_axis : array like
+        coordinates where Ez_field and Hy_field are defined.
+        If None, assumes same as cross_axis.
+
+    Returns
+    -------
+    float or ndarray
+        The normalized modal overlap value(s). If Ez_field and Hy_field contain 
+        multiple slices along one axis (e.g., different z-planes), the function 
+        returns an array of overlap values, one per slice.
+
+    Notes
+    -----
+    - The overlap integral is computed as:
+      
+          0.5 * ∫ (Ez_cross * Hy_field* + Hy_cross * Ez_field*) dx
+
+      evaluated element-wise along the specified axis.
+    - The mode normalization is computed from:
+
+          ∫ (Ez_cross * Hy_cross*) dx
+
+    - The field normalization is evaluated at the position of the maximum real Ez 
+      field component and uses:
+
+          ∫ (Ez_field * Hy_field*) dx
+
+    - The final output is the absolute value of the normalized overlap:
+
+          |overlap / mode_norm / field_norm|
+
+    - This metric is useful for estimating coupling efficiency between the analytical 
+      mode profile and the simulated fields.
+
+    """
+    if cross_axis is not None and field_axis is not None:
+        # Interpolate the mode cross sections to match the field axis
+        Ez_cross_interp = interp1d(
+            cross_axis,
+            Ez_cross,
+            kind='cubic',
+            bounds_error=False,
+            fill_value=0.0
+        )
+        Hy_cross_interp = interp1d(
+            cross_axis,
+            Hy_cross,
+            kind='cubic',
+            bounds_error=False,
+            fill_value=0.0
+        )
+
+        # Use the field axis to get the mode in the same grid 
+        Ez_cross = Ez_cross_interp(field_axis)
+        Hy_cross = Hy_cross_interp(field_axis)
+
+    # Calculate the overlap integral as the power between the modes and the fields.
+    overlap = 0.5 * np.sum(np.abs(Ez_cross * np.conj(Hy_field) + Hy_cross * np.conj(Ez_field)), axis=1)
+
+    # Calculate the normalization factor the the mode
+    mode_norm = np.sqrt(np.abs(np.sum((Ez_cross * np.conj(Hy_cross)))))
+
+    # Calculate the normalization factor for the fields, based on the maximum Ez field position
+    x_imax = np.argmax(np.real(Ez_field))
+    x_max_index, _ = np.unravel_index(x_imax, Ez_field.shape)
+    field_norm = np.sqrt(np.abs(np.sum((Ez_field[x_max_index] * np.conj(Hy_field[x_max_index])))))
+
+    # Normalize the overlap
+    overlap_norm = abs(overlap / mode_norm / field_norm)
+
+    return overlap_norm
