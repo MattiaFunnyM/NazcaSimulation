@@ -69,22 +69,29 @@ else:
         neff = data["neff"]
         cross_axis = np.array(data["cross_axis"])
 
-# Creat a source from the mode fields
+# Update the geometry variables
 cld_length2 = 50
+cld_width2 = 10
 wvg_length2 = cld_length2
+wvg_shift2 = 0.6
+
+# Creat a source from the mode fields
 source = SL.generate_modal_source(Ez_cross = Ez1_cross,
                                   Hy_cross = Hy1_cross,
                                   cross_axis = np.linspace(-cld_width/2, cld_width/2, len(Ez1_cross)),
-                                  src_position = mp.Vector3(-cld_length2 / 2 + pml_thickness, 0),
+                                  src_position = mp.Vector3(-cld_length2 / 2 + pml_thickness, wvg_shift2),
                                   src_size=mp.Vector3(0, cld_width),
                                   frequency=src_freq)
 
 geometry = [
-        mp.Block(size=mp.Vector3(cld_length2, cld_width, cld_height),
+        mp.Block(size=mp.Vector3(cld_length2, cld_width2, cld_height),
                 center=mp.Vector3(),
                 material=mp.Medium(epsilon=cld_neff**2)),
         mp.Block(size=mp.Vector3(wvg_length2, wvg_width, wvg_height),
-                center=mp.Vector3(0, 0),
+                center=mp.Vector3(0, wvg_shift2),
+                material=mp.Medium(epsilon=wvg_neff**2)),
+        mp.Block(size=mp.Vector3(wvg_length2, wvg_width, wvg_height),
+                center=mp.Vector3(0, -wvg_shift2),
                 material=mp.Medium(epsilon=wvg_neff**2))]
 cell_size, cell_center = SL.compute_geometry_bounds(geometry)
 
@@ -114,20 +121,21 @@ eps_data = sim.get_array(center=mp.Vector3(0, 0, 0),
 ez_data = sim.get_dft_array(dft, mp.Ez, 0)
 hy_data = sim.get_dft_array(dft, mp.Hy, 0)
 
-# Extract the field axis 
-field_axis = np.linspace(-cld_width/2, cld_width/2, len(ez_data[0]))
-
 plt.figure()
 plt.imshow(eps_data.transpose(), interpolation='spline36', cmap='binary', aspect='auto')
 plt.imshow(abs(ez_data).transpose(), interpolation='spline36', cmap='RdBu', alpha=0.9, aspect='auto')
 plt.axis('off')
 plt.show()
 
+# Extract the field axis 
+cross_axis_shift = cross_axis + wvg_shift2
+field_axis = np.linspace(-cld_width2/2, cld_width2/2, len(ez_data[0]))
+
 overlap = SL.calculate_modal_overlap(Ez_cross = Ez1_cross, 
                                      Hy_cross = Hy1_cross, 
                                      Ez_field = ez_data, 
                                      Hy_field = hy_data,
-                                     cross_axis = cross_axis,
+                                     cross_axis = cross_axis_shift,
                                      field_axis = field_axis)
 plt.plot(overlap)
 plt.grid()
