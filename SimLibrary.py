@@ -190,7 +190,7 @@ def finding_mode_from_geometry(geometry, mode=1, frequency=1, resolution=20, tim
     # Return the field cross section 
     return Ez1_cross_norm, Hy1_cross_norm, neff
 
-def generate_modal_source(Ez_cross, Hy_cross, cross_axis, src_position, src_size, src_decay, frequency=1):
+def generate_modal_source(Ez_cross, Hy_cross, cross_axis, src_position, src_size, src_decay=3, frequency=1):
     """
     Create a custom Meep source that generates an electromagnetic mode with specified 
     electric and magnetic field profiles along a given cross-sectional axis.
