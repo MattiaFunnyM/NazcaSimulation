@@ -13,7 +13,7 @@ def compute_geometry_bounds(geometry_list):
     Parameters
     ----------
     geometry_list : list of mp.GeometricObject
-        List of Meep geometric objects (e.g., blocks, cylinders) to include 
+        List of Meep geometric objects (e.g., blocks, prisms) to include 
         in the bounding box calculation.
 
     Returns
@@ -23,11 +23,6 @@ def compute_geometry_bounds(geometry_list):
     bounding_center : mp.Vector3
         Center position of the bounding box.
 
-    Notes
-    -----
-    - Each object's size and center are used to determine the minimum and maximum 
-      extents along each axis.
-    - The resulting bounding box is axis-aligned.
     """
    
     # Init bounds with infinities
@@ -35,29 +30,51 @@ def compute_geometry_bounds(geometry_list):
     xmax, ymax, zmax = -np.inf, -np.inf, -np.inf
 
     for obj in geometry_list:
-        size = obj.size
-        center = obj.center
+        # Extract bounding points based on object type
+        if isinstance(obj, mp.Prism):
+            # For Prism: extract vertices and height
+            vertices = obj.vertices
+            height = obj.height if obj.height != mp.inf else 0
+            axis = obj.axis if hasattr(obj, 'axis') else mp.Vector3(0, 0, 1)
 
-        # Half-sizes
-        hx = size.x / 2
-        hy = size.y / 2
-        hz = size.z / 2
-
-        # Bounds for current object
-        oxmin = center.x - hx
-        oxmax = center.x + hx
-        oymin = center.y - hy
-        oymax = center.y + hy
-        ozmin = center.z - hz
-        ozmax = center.z + hz
-
-        # Update global bounds
-        xmin = min(xmin, oxmin)
-        xmax = max(xmax, oxmax)
-        ymin = min(ymin, oymin)
-        ymax = max(ymax, oymax)
-        zmin = min(zmin, ozmin)
-        zmax = max(zmax, ozmax)
+            # Compute height vector along the axis
+            V = mp.Vector3(axis.x * height / 2, axis.y * height / 2, axis.z * height / 2)
+         
+            # Create 3D points from 2D vertices +/- height vector
+            points = []
+            for vertex in vertices:
+                # Add points at both ends along the axis
+                points.extend([
+                    (vertex.x - V.x, vertex.y - V.y, vertex.z - V.z),
+                    (vertex.x + V.x, vertex.y + V.y, vertex.z + V.z),
+                ])
+        else:
+            # For objects with .size: create corner points
+            size = obj.size
+            center = obj.center
+        
+            hx, hy, hz = size.x / 2, size.y / 2, size.z / 2
+            
+            # Generate all 8 corners of the bounding box
+            points = [
+                (center.x - hx, center.y - hy, center.z - hz),
+                (center.x + hx, center.y - hy, center.z - hz),
+                (center.x - hx, center.y + hy, center.z - hz),
+                (center.x + hx, center.y + hy, center.z - hz),
+                (center.x - hx, center.y - hy, center.z + hz),
+                (center.x + hx, center.y - hy, center.z + hz),
+                (center.x - hx, center.y + hy, center.z + hz),
+                (center.x + hx, center.y + hy, center.z + hz),
+            ]
+        
+        # Update global bounds from all points
+        for x, y, z in points:
+            xmin = min(xmin, x)
+            xmax = max(xmax, x)
+            ymin = min(ymin, y)
+            ymax = max(ymax, y)
+            zmin = min(zmin, z)
+            zmax = max(zmax, z)
 
     # Create final mp.Vector3
     bounding_size = mp.Vector3(xmax - xmin, ymax - ymin, zmax - zmin)
