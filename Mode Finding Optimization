@@ -71,19 +71,36 @@ else:
 
 # Update the geometry variables
 cld_length2 = 50
-cld_width2 = 10
+cld_width2 = 5
 wvg_length2 = cld_length2
 wvg_shift2 = 0.6
 
-# Creat a source from the mode fields
-source = SL.generate_modal_source(Ez_cross = Ez1_cross,
-                                  Hy_cross = Hy1_cross,
-                                  cross_axis = np.linspace(-cld_width/2, cld_width/2, len(Ez1_cross)),
-                                  src_position = mp.Vector3(-cld_length2 / 2 + pml_thickness, wvg_shift2),
-                                  src_size=mp.Vector3(0, cld_width),
-                                  frequency=src_freq)
+# Linear taper
+taper_width = 0.5
+taper_length = 20
+taper_vertices = [mp.Vector3(-wvg_length2/2-taper_length/2-5, -cld_width/2),
+                  mp.Vector3(-wvg_length2/2-taper_length/2-5, -wvg_width/2),
+                  mp.Vector3(-wvg_length2/2-taper_length/2, -wvg_width/2),
+                  mp.Vector3(wvg_length2/2+taper_length/2, -taper_width/2),
+                  mp.Vector3(wvg_length2/2+taper_length/2+5, -taper_width/2),
+                  mp.Vector3(wvg_length2/2+taper_length/2+5, +taper_width/2),
+                  mp.Vector3(wvg_length2/2+taper_length/2, +taper_width/2),
+                  mp.Vector3(-wvg_length2/2-taper_length/2, +wvg_width/2),
+                  mp.Vector3(-wvg_length2/2-taper_length/2-5, +wvg_width/2),
+                  mp.Vector3(-wvg_length2/2-taper_length/2-5, +cld_width/2),]
 
-geometry = [
+matgrid = SL.polygon_to_materialgrid(
+        vertices=taper_vertices,
+        medium_outside=mp.Medium(epsilon=cld_neff**2),
+        medium_inside=mp.Medium(epsilon=wvg_neff**2),
+        sub_resolution=sim_prop_resolution*1)
+
+taper = [mp.Block(size=mp.Vector3(cld_length2+taper_length+10, cld_width2, cld_height),
+                  center=mp.Vector3(),
+                  material=matgrid)]
+
+# Two waveguide separated to simulate a coupler
+coupler = [
         mp.Block(size=mp.Vector3(cld_length2, cld_width2, cld_height),
                 center=mp.Vector3(),
                 material=mp.Medium(epsilon=cld_neff**2)),
@@ -93,7 +110,17 @@ geometry = [
         mp.Block(size=mp.Vector3(wvg_length2, wvg_width, wvg_height),
                 center=mp.Vector3(0, -wvg_shift2),
                 material=mp.Medium(epsilon=wvg_neff**2))]
+# Select the geometry
+geometry = taper
 cell_size, cell_center = SL.compute_geometry_bounds(geometry)
+
+# Creat a source from the mode fields
+source = SL.generate_modal_source(Ez_cross = Ez1_cross,
+                                  Hy_cross = Hy1_cross,
+                                  cross_axis = np.linspace(-cld_width/2, cld_width/2, len(Ez1_cross)),
+                                  src_position = mp.Vector3(-cld_length2 / 2 - taper_length/2 - 5 + pml_thickness, 0),
+                                  src_size=mp.Vector3(0, cld_width2),
+                                  frequency=src_freq)
 
 pml_layers = [mp.PML(pml_thickness)]
 sim = mp.Simulation(
@@ -128,18 +155,20 @@ plt.axis('off')
 plt.show()
 
 # Extract the field axis 
-cross_axis_shift = cross_axis + wvg_shift2
+if geometry == coupler:
+        cross_axis_used = cross_axis + wvg_shift2   
+else:
+        cross_axis_used = cross_axis
 field_axis = np.linspace(-cld_width2/2, cld_width2/2, len(ez_data[0]))
-
 overlap = SL.calculate_modal_overlap(Ez_cross = Ez1_cross, 
                                      Hy_cross = Hy1_cross, 
                                      Ez_field = ez_data, 
                                      Hy_field = hy_data,
-                                     cross_axis = cross_axis_shift,
+                                     cross_axis = cross_axis_used,
                                      field_axis = field_axis)
 plt.plot(overlap)
 plt.grid()
 plt.show()
-# > CALCULATE OVERLAP WITH MODE
+
 # > CALCULATE BEND GEOMETRY
 # > VISUALIZE MODE, PROP... in one plot
