@@ -1,6 +1,80 @@
 import meep as mp
 import numpy as np
+from matplotlib.path import Path
 from scipy.interpolate import interp1d
+
+def polygon_to_materialgrid(
+    vertices,
+    medium_outside,
+    medium_inside,
+    sub_resolution=20,
+):
+    poly_xy = np.array([(v.x, v.y) for v in vertices], dtype=float)
+    xmin, ymin = poly_xy.min(axis=0)
+    xmax, ymax = poly_xy.max(axis=0)
+    Lx, Ly = (xmax - xmin), (ymax - ymin)
+
+    Nx = max(1, int(np.ceil(Lx * sub_resolution)))
+    Ny = max(1, int(np.ceil(Ly * sub_resolution)))
+    Nz = 1
+
+    dx = Lx / Nx
+    dy = Ly / Ny
+
+    poly_path = Path(poly_xy)
+
+    # --- 1) Cheap inside/outside on pixel centers ---
+    x_cent = xmin + (np.arange(Nx) + 0.5) * dx
+    y_cent = ymin + (np.arange(Ny) + 0.5) * dy
+    Xc, Yc = np.meshgrid(x_cent, y_cent, indexing="ij")
+    pts_c = np.column_stack([Xc.ravel(), Yc.ravel()])
+    inside_c = poly_path.contains_points(pts_c).reshape(Nx, Ny)
+
+    weights = inside_c.astype(np.float64)  # start as 0/1
+
+    # --- 2) Find interface pixels (4-neighbor change) ---
+    # A pixel is "boundary" if any neighbor differs.
+    boundary = np.zeros((Nx, Ny), dtype=bool)
+
+    boundary[1:, :]  |= (inside_c[1:, :]  != inside_c[:-1, :])
+    boundary[:-1, :] |= (inside_c[:-1, :] != inside_c[1:, :])
+    boundary[:, 1:]  |= (inside_c[:, 1:]  != inside_c[:, :-1])
+    boundary[:, :-1] |= (inside_c[:, :-1] != inside_c[:, 1:])
+
+    bi, bj = np.nonzero(boundary)
+    nb = bi.size
+
+    # --- 3) Supersample only boundary pixels to get area fraction ---
+    if nb > 0 and sub_resolution > 1:
+        # subcell offsets in [0,1] at subcell centers
+        ox = (np.arange(sub_resolution) + 0.5) / sub_resolution
+        oy = (np.arange(sub_resolution) + 0.5) / sub_resolution
+
+        # pixel corner coordinates for each boundary pixel
+        x0 = xmin + bi * dx
+        y0 = ymin + bj * dy
+
+        # Build all subpoints for all boundary pixels in one batch:
+        # Xs, Ys shapes: (nb, aa, aa)
+        Xs = x0[:, None, None] + ox[None, :, None] * dx
+        Ys = y0[:, None, None] + oy[None, None, :] * dy
+
+        pts = np.column_stack([Xs.ravel(), Ys.ravel()])
+        inside_sub = poly_path.contains_points(pts).reshape(nb, sub_resolution, 1)
+
+        frac = inside_sub.mean(axis=(1, 2))  # (nb,) in [0,1]
+        weights[bi, bj] = frac
+
+    # (Nx, Ny, 1) for 2D MaterialGrid
+    weights3d = weights[:, :, None]
+
+    matgrid = mp.MaterialGrid(
+        mp.Vector3(Nx, Ny, Nz),
+        medium1=medium_outside,
+        medium2=medium_inside,
+        weights=weights3d
+    )
+    return matgrid
 
 def compute_geometry_bounds(geometry_list):
     """
@@ -295,7 +369,6 @@ def generate_modal_source(Ez_cross, Hy_cross, cross_axis, src_position, src_size
     amp_func = spatial_profile_Hy)]
 
     return source
-
 
 def calculate_modal_overlap(Ez_cross, Hy_cross, Ez_field, Hy_field, cross_axis=None, field_axis=None):
     """
