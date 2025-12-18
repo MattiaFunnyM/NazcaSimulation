@@ -1,3 +1,4 @@
+from matplotlib.widgets import Button
 import matplotlib.pyplot as plt
 import SimLibrary as SL
 import numpy as np
@@ -7,7 +8,7 @@ import json
 width_found = True
 mode_calculated = True
 propagation_waveguide = True
-propagation_coupler = False
+propagation_coupler = True
 propagation_mmi = False
 propagation_taper = False
 propagation_ring = False
@@ -15,7 +16,6 @@ propagation_ring = False
 #################################################################
 ###  1 - Find waveguide width for single mode in wanted range ###
 #################################################################
-
 # If we need to determine the mode in the wavelength of interest
 if not width_found:
         wvl_min = 1530 # nm
@@ -81,13 +81,11 @@ if not width_found:
 #################################################################
 ###  2 - Find waveguide modes for all wavelengths of interest ###
 #################################################################
-
 if not mode_calculated:
         wvl_min = 1530 # nm
-        wvl_max = 1565 # nm
+        wvl_max = 1565 # nm 
         wvl_n = 8
-        wvl_simulated = np.linspace(wvl_min, wvl_max, wvl_n)
-        frq_simulated = 1000 / wvl_simulated
+        frq_simulated = np.linspace(1000 / wvl_max, 1000 / wvl_min, wvl_n)
 
         # Geometry parameters
         sim_length = 5
@@ -103,7 +101,7 @@ if not mode_calculated:
         fig, ax = plt.subplots(1, 1, figsize=(12, 8))
 
         # Loop through all frequencies
-        for wvl_idx, (wvl, frq) in enumerate(zip(wvl_simulated, frq_simulated)):
+        for frq_idx, frq in enumerate(frq_simulated):
                 geometry = [
                 mp.Block(size=mp.Vector3(sim_length, sim_width, 0),
                         center=mp.Vector3(),
@@ -123,7 +121,7 @@ if not mode_calculated:
 
                 # Plotting with different colors for each wavelength
                 ax.plot(cross_axis, Ez1_cross, 
-                        label=f'λ={wvl:.1f}nm, neff={neff:.3f}', 
+                        label=f'f={frq:.3f}nm, neff={neff:.3f}', 
                         linewidth=2)
 
                 # Saving individual data files for each wavelength
@@ -133,12 +131,11 @@ if not mode_calculated:
                 "neff": float(neff),
                 "cross_axis": cross_axis.tolist(),
                 "wvg_width": float(wvg_width),
-                "wavelength": float(wvl),
                 "frequency": float(frq)
                 }
 
                 # Save individual file
-                with open(f"Output/Mode_ex_width{wvg_width}_wavelength{wvl:.0f}nm.json", "w") as f:
+                with open(f"Output/Mode_ex_width{wvg_width}_frequency{frq:.3f}nm.json", "w") as f:
                         json.dump(data, f)
 
                 # Configure plot with larger fonts
@@ -158,144 +155,514 @@ if not mode_calculated:
 ###  3 - Propagate waveguide and calculate overlap with mode  ###
 #################################################################
 if not propagation_waveguide:
-    wvl_min = 1530 # nm
-    wvl_max = 1565 # nm
-    wvl_n = 8
-    wvl_simulated = np.linspace(wvl_min, wvl_max, wvl_n)
-    frq_simulated = 1000 / wvl_simulated
+        wvl_min = 1530 # nm
+        wvl_max = 1565 # nm 
+        wvl_n = 8
+        frq_simulated = np.linspace(1000 / wvl_max, 1000 / wvl_min, wvl_n)
 
-    # Geometry parameters
-    sim_length = 50
-    sim_width = 5
-    sim_resolution = 20
-    pml_thickness = 1
-    wvg_neff = 3
-    cld_neff = 1.3
+        # Geometry parameters
+        sim_length = 50
+        sim_width = 5
+        sim_resolution = 20
+        pml_thickness = 1
+        wvg_neff = 3
+        cld_neff = 1.3
 
-    # Define fixed waveguide width
-    wvg_width = 0.3 
+        # Define fixed waveguide width
+        wvg_width = 0.3 
 
-    # Create the geometry
-    geometry = [
-        mp.Block(size=mp.Vector3(sim_length, sim_width, 0),
-                center=mp.Vector3(),
-                material=mp.Medium(epsilon=cld_neff**2)),
-        mp.Block(size=mp.Vector3(sim_length, wvg_width, 0),
-                center=mp.Vector3(),
-                material=mp.Medium(epsilon=wvg_neff**2))]
-    
-    # Calculate the cell size and position
-    cell_size, cell_center = SL.compute_geometry_bounds(geometry)
-
-    # Boundary condition
-    pml_layers = [mp.PML(pml_thickness)]
-    
-    # Create the sources joining all the frequencies
-    sources = []
-    Ez1_cross_array = []
-    Hy1_cross_array = []
-    for wvl, frq in zip(wvl_simulated, frq_simulated):
-        # Load mode from previous calculated one
-        with open(f"Output/Mode_ex_width{wvg_width}_wavelength{wvl:.0f}nm.json", "r") as f:
-            data = json.load(f)
-            Ez1_cross = np.array(data["Ez"])
-            Hy1_cross = np.array(data["Hy"])
-            neff = data["neff"]
-            cross_axis = np.array(data["cross_axis"])
-
-        # Append to array
-        Ez1_cross_array.append(Ez1_cross)
-        Hy1_cross_array.append(Hy1_cross)
-
-        # Create a source from the mode fields
-        source = SL.generate_modal_source(Ez_cross = Ez1_cross,
-                                         Hy_cross = Hy1_cross,
-                                         cross_axis = np.linspace(-sim_width/2, sim_width/2, len(Ez1_cross)),
-                                         src_position = mp.Vector3(-sim_length / 2 + pml_thickness, 0),
-                                         src_size=mp.Vector3(0, sim_width),
-                                         frequency=frq)
+        # Create the geometry
+        geometry = [
+                mp.Block(size=mp.Vector3(sim_length, sim_width, 0),
+                        center=mp.Vector3(),
+                        material=mp.Medium(epsilon=cld_neff**2)),
+                mp.Block(size=mp.Vector3(sim_length, wvg_width, 0),
+                        center=mp.Vector3(),
+                        material=mp.Medium(epsilon=wvg_neff**2))]
         
-        sources.append(source[0])
-        sources.append(source[1])
+        # Calculate the cell size and position
+        cell_size, cell_center = SL.compute_geometry_bounds(geometry)
 
-    # Simulation settings
-    sim = mp.Simulation(
+        # Boundary condition
+        pml_layers = [mp.PML(pml_thickness)]
+        
+        # Create the sources joining all the frequencies
+        sources = []
+        Ez1_cross_array = []
+        Hy1_cross_array = []
+        for frq in frq_simulated:
+                # Load mode from previous calculated one
+                with open(f"Output/Mode_ex_width{wvg_width}_frequency{frq:.3f}nm.json", "r") as f:
+                        data = json.load(f)
+                        Ez1_cross = np.array(data["Ez"])
+                        Hy1_cross = np.array(data["Hy"])
+                        neff = data["neff"]
+                        cross_axis = np.array(data["cross_axis"])
+
+                        # Append to array
+                        Ez1_cross_array.append(Ez1_cross)
+                        Hy1_cross_array.append(Hy1_cross)
+
+                # Create a source from the mode fields
+                source = SL.generate_modal_source(Ez_cross = Ez1_cross,
+                                                Hy_cross = Hy1_cross,
+                                                cross_axis = np.linspace(-sim_width/2, sim_width/2, len(Ez1_cross)),
+                                                src_position = mp.Vector3(-sim_length / 2 + pml_thickness, 0),
+                                                src_size=mp.Vector3(0, sim_width),
+                                                frequency=frq)
+                
+                sources.append(source[0])
+                sources.append(source[1])
+
+        # Simulation settings
+        sim = mp.Simulation(
+                cell_size=cell_size,
+                sources=sources,
+                geometry=geometry,
+                resolution=sim_resolution,
+                boundary_layers=pml_layers
+        )
+
+        # Define DFT fields to be recorded
+        dft = sim.add_dft_fields([mp.Ez, mp.Hy], frq_simulated, 
+                                                where=mp.Volume(center=mp.Vector3(),
+                                                size=cell_size))
+
+        # Run the simulation
+        sim.run(until=sim_length*wvg_neff*2)
+        
+        # Visualize the geometry simulated
+        eps_data = sim.get_array(center=mp.Vector3(0, 0, 0), 
+                                size=cell_size, 
+                                component=mp.Dielectric)
+
+        # Create figure with two subplots
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+        
+        # LEFT SUBPLOT - Field Propagation Visualization
+        # Plot the material structure
+        ax1.imshow(eps_data.transpose(), interpolation='spline36', cmap='binary', aspect='auto')
+        overlap_axis = np.linspace(-sim_length/2, sim_length/2, len(eps_data))
+
+        # Extract the fields at the DFT region and compute overlaps
+        for idx, frq in enumerate(frq_simulated):
+                ez_data = sim.get_dft_array(dft, mp.Ez, idx)
+                hy_data = sim.get_dft_array(dft, mp.Hy, idx)
+                
+                # Overlay field on the left subplot (using transparency to show all)
+                ax1.imshow(np.abs(ez_data).transpose(), interpolation='spline36', 
+                        cmap='RdBu', alpha=0.1, aspect='auto')
+                
+                # Create field axis for the cross section
+                field_axis = np.linspace(-sim_width/2, sim_width/2, len(ez_data[0]))
+                
+                # Calculate overlap
+                overlap = SL.calculate_modal_overlap(Ez_cross = Ez1_cross_array[idx], 
+                                                Hy_cross = Hy1_cross_array[idx], 
+                                                Ez_field = ez_data, 
+                                                Hy_field = hy_data,
+                                                cross_axis = cross_axis,
+                                                field_axis = field_axis)
+                
+                # Add overlap to the plot
+                ax2.plot(overlap_axis, overlap, label=f"frq {frq:.3f} THz/c")
+                
+        # Configure left subplot
+        plt_fontsize = 16
+        ax1.set_title('Field Propagation (Ez)', fontsize=plt_fontsize, fontweight='bold')
+        ax1.set_xlabel('Position [μm]', fontsize=plt_fontsize)
+        ax1.set_ylabel('Width [μm]', fontsize=plt_fontsize)
+        ax1.axis('off')
+        
+        # Add scale bar or position markers
+        ax1.axvline(x=pml_thickness*sim_resolution, color='white', linestyle='--', alpha=0.5, linewidth=1)
+        ax1.axvline(x=(sim_length-pml_thickness)*sim_resolution, color='white', linestyle='--', alpha=0.5, linewidth=1)
+        ax1.text(pml_thickness*sim_resolution, 5, 'PML', color='white', fontsize=plt_fontsize, rotation=90)
+        
+        # RIGHT SUBPLOT - Overlap
+        ax2.set_xlabel('Distance [μm]', fontsize=plt_fontsize)
+        ax2.set_ylabel('Modal Overlap', fontsize=plt_fontsize)
+        ax2.set_title('Modal Overlap vs Wavelength', fontsize=plt_fontsize, fontweight='bold')
+        ax2.grid(True, alpha=0.3)
+        ax2.legend()
+        
+        # Overall title
+        fig.suptitle(f'Waveguide Propagation Analysis (Width = {wvg_width}μm)', 
+                        fontsize=16, fontweight='bold')
+        
+        plt.show()
+
+
+#################################################################
+###  4 - Propagate light in a coupler to see its overlap      ###
+#################################################################
+if not propagation_coupler:
+        wvl_min = 1530 # nm
+        wvl_max = 1565 # nm 
+        wvl_n = 8
+        frq_simulated = np.linspace(1000 / wvl_max, 1000 / wvl_min, wvl_n)
+
+        # Geometry parameters
+        sim_length = 50
+        sim_width = 5
+        sim_resolution = 20
+        pml_thickness = 1
+        wvg_neff = 3
+        cld_neff = 1.3
+
+        # Define fixed waveguide width
+        wvg_width = 0.3 
+        coupler_gap = 0.3
+
+        # Create the geometry
+        geometry = [
+                mp.Block(size=mp.Vector3(sim_length, sim_width, 0),
+                        center=mp.Vector3(),
+                        material=mp.Medium(epsilon=cld_neff**2)),
+                mp.Block(size=mp.Vector3(sim_length, wvg_width, 0),
+                        center=mp.Vector3(0, coupler_gap/2+wvg_width/2),
+                        material=mp.Medium(epsilon=wvg_neff**2)),
+                mp.Block(size=mp.Vector3(sim_length, wvg_width, 0),
+                        center=mp.Vector3(0, -coupler_gap/2-wvg_width/2),
+                        material=mp.Medium(epsilon=wvg_neff**2))]
+
+        # Calculate the cell size and position
+        cell_size, cell_center = SL.compute_geometry_bounds(geometry)
+
+        # Boundary condition
+        pml_layers = [mp.PML(pml_thickness)]
+
+        # Create the sources joining all the frequencies
+        sources = []
+        Ez1_cross_array = []
+        Hy1_cross_array = []
+        for frq in frq_simulated:
+                # Load mode from previous calculated one
+                with open(f"Output/Mode_ex_width{wvg_width}_frequency{frq:.3f}nm.json", "r") as f:
+                        data = json.load(f)
+                        Ez1_cross = np.array(data["Ez"])
+                        Hy1_cross = np.array(data["Hy"])
+                        neff = data["neff"]
+                        cross_axis = np.array(data["cross_axis"])
+
+                # Append to array
+                Ez1_cross_array.append(Ez1_cross)
+                Hy1_cross_array.append(Hy1_cross)
+
+                # Create a source from the mode fields
+                source = SL.generate_modal_source(Ez_cross = Ez1_cross,
+                                                Hy_cross = Hy1_cross,
+                                                cross_axis = np.linspace(-sim_width/2, sim_width/2, len(Ez1_cross)),
+                                                src_position = mp.Vector3(-sim_length / 2 + pml_thickness, coupler_gap/2+wvg_width/2),
+                                                src_size=mp.Vector3(0, sim_width),
+                                                frequency=frq)
+
+                sources.append(source[0])
+                sources.append(source[1])
+
+        # Simulation settings
+        sim = mp.Simulation(
+                cell_size=cell_size,
+                sources=sources,
+                geometry=geometry,
+                resolution=sim_resolution,
+                boundary_layers=pml_layers)
+
+        # Define DFT fields to be recorded
+        dft = sim.add_dft_fields([mp.Ez, mp.Hy], frq_simulated, 
+                                        where=mp.Volume(center=mp.Vector3(),
+                                        size=cell_size))
+
+        # Run the simulation
+        sim.run(until=sim_length*wvg_neff*2)
+
+        # Visualize the geometry simulated
+        eps_data = sim.get_array(center=mp.Vector3(0, 0, 0), 
+                                size=cell_size, 
+                                component=mp.Dielectric)
+
+        # Create figure with two subplots
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+
+        # LEFT SUBPLOT - Field Propagation Visualization
+        # Plot the material structure
+        ax1.imshow(eps_data.transpose(), interpolation='spline36', cmap='binary', aspect='auto')
+        overlap_axis = np.linspace(0, sim_length, len(eps_data))
+
+        # Extract the fields at the DFT region and compute overlaps
+        for idx, frq in enumerate(frq_simulated):
+                ez_data = sim.get_dft_array(dft, mp.Ez, idx)
+                hy_data = sim.get_dft_array(dft, mp.Hy, idx)
+
+                # Overlay field on the left subplot (using transparency to show all)
+                ax1.imshow(np.abs(ez_data).transpose(), interpolation='spline36', 
+                                cmap='RdBu', alpha=0.1, aspect='auto')
+
+                # Create field axis for the cross section
+                field_axis = np.linspace(-sim_width/2, sim_width/2, len(ez_data[0]))
+
+                # Calculate overlap
+                overlap = SL.calculate_modal_overlap(Ez_cross = Ez1_cross_array[idx], 
+                                                Hy_cross = Hy1_cross_array[idx], 
+                                                Ez_field = ez_data, 
+                                                Hy_field = hy_data,
+                                                cross_axis = cross_axis + coupler_gap / 2 + wvg_width / 2,
+                                                field_axis = field_axis)
+
+                # Add overlap to the plot
+                ax2.plot(overlap_axis, overlap, label=f"frq {frq:.3f} nm")
+
+        # Configure left subplot
+        plt_fontsize = 16
+        ax1.set_title('Field Propagation (Ez)', fontsize=plt_fontsize, fontweight='bold')
+        ax1.set_xlabel('Position [μm]', fontsize=plt_fontsize)
+        ax1.set_ylabel('Width [μm]', fontsize=plt_fontsize)
+        ax1.axis('off')
+
+        # Add scale bar or position markers
+        ax1.axvline(x=pml_thickness*sim_resolution, color='white', linestyle='--', alpha=0.5, linewidth=1)
+        ax1.axvline(x=(sim_length-pml_thickness)*sim_resolution, color='white', linestyle='--', alpha=0.5, linewidth=1)
+        ax1.text(pml_thickness*sim_resolution, 5, 'PML', color='white', fontsize=plt_fontsize, rotation=90)
+
+        # RIGHT SUBPLOT - Overlap
+        ax2.set_xlabel('Distance [μm]', fontsize=plt_fontsize)
+        ax2.set_ylabel('Modal Overlap', fontsize=plt_fontsize)
+        ax2.set_title('Modal Overlap vs Wavelength', fontsize=plt_fontsize, fontweight='bold')
+        ax2.tick_params(axis='x', labelsize=plt_fontsize)
+        ax2.tick_params(axis='y', labelsize=plt_fontsize)
+        ax2.grid(True, alpha=0.3)
+        ax2.legend()
+
+        # Overall title
+        fig.suptitle(f'Waveguide Propagation Analysis (Width = {wvg_width}μm)', 
+                fontsize=16, fontweight='bold')
+
+        plt.show()
+
+#################################################################
+###  5 - Propagate light in a MMI to see its overlap          ###
+#################################################################
+if not propagation_mmi:
+        wvl_min = 1530 # nm
+        wvl_max = 1565 # nm
+        wvl_n = 2
+        wvl_simulated = np.linspace(wvl_min, wvl_max, wvl_n)
+        frq_simulated = 1000 / wvl_simulated
+
+        # Geometry parameters
+        sim_length = 50
+        sim_width = 6
+        sim_resolution = 20
+        pml_thickness = 1
+        wvg_neff = 3
+        cld_neff = 1.3
+
+        # Define building block_geometry
+        mmi_width = 4
+        mmi_output_shift = mmi_width / 3
+        mmi_length = 5
+        wvg_width = 0.3 
+        wvg_length = (sim_length - mmi_length) / 2
+
+        # Create the geometry
+        geometry = [
+                # Background
+                mp.Block(size=mp.Vector3(sim_length, sim_width, 0),
+                        center=mp.Vector3(),
+                        material=mp.Medium(epsilon=cld_neff**2)),
+                # Input waveguide
+                mp.Block(size=mp.Vector3(wvg_length, wvg_width, 0),
+                        center=mp.Vector3(-sim_length/2+wvg_length/2),
+                        material=mp.Medium(epsilon=wvg_neff**2)),
+                # MMI section
+                mp.Block(size=mp.Vector3(mmi_length, mmi_width, 0),
+                        center=mp.Vector3(),
+                        material=mp.Medium(epsilon=wvg_neff**2)),
+                # Top waveguide output
+                mp.Block(size=mp.Vector3(wvg_length, wvg_width, 0),
+                        center=mp.Vector3(sim_length/2-wvg_length/2, mmi_output_shift),
+                        material=mp.Medium(epsilon=wvg_neff**2)),
+                # Bottom waveguide output
+                mp.Block(size=mp.Vector3(wvg_length, wvg_width, 0),
+                        center=mp.Vector3(sim_length/2-wvg_length/2, -mmi_output_shift),
+                        material=mp.Medium(epsilon=wvg_neff**2))]
+
+        # Calculate the cell size and position
+        cell_size, cell_center = SL.compute_geometry_bounds(geometry)
+
+        # Boundary condition
+        pml_layers = [mp.PML(pml_thickness)]
+
+        # Initialize all arrays
+        Ez1_cross_array = []
+        Hy1_cross_array = []
+        sources = []
+
+        # Load all data
+        for wvl, frq in zip(wvl_simulated, frq_simulated):
+                with open(f"Output/Mode_ex_width{wvg_width}_wavelength{wvl:.0f}nm.json", "r") as f:
+                        data = json.load(f)
+                        Ez1_cross = np.array(data["Ez"])
+                        Hy1_cross = np.array(data["Hy"])
+                        cross_axis = np.array(data["cross_axis"])
+
+                Ez1_cross_array.append(Ez1_cross)
+                Hy1_cross_array.append(Hy1_cross)
+                
+                # Create a source with the mode just loaded
+                source = SL.generate_modal_source(
+                        Ez_cross=Ez1_cross,
+                        Hy_cross=Hy1_cross,
+                        cross_axis=np.linspace(-sim_width/2, sim_width/2, len(Ez1_cross)),
+                        src_position=mp.Vector3(-sim_length / 2 + pml_thickness),
+                        src_size=mp.Vector3(0, sim_width),
+                        frequency=frq
+                )
+                sources.append(source[0])
+                sources.append(source[1])
+
+
+        # Simulation settings preparation
+        sim = mp.Simulation(
         cell_size=cell_size,
         sources=sources,
         geometry=geometry,
         resolution=sim_resolution,
         boundary_layers=pml_layers
-    )
+        )
 
-    # Define DFT fields to be recorded
-    dft_arrays = []
-    for frq in frq_simulated:
-        dft_arrays.append(sim.add_dft_fields([mp.Ez, mp.Hy], frq, 0, 1, 
-                                            where=mp.Volume(center=mp.Vector3(),
-                                            size=cell_size)))
+        # Times for simulation (different for initial and final overlap)
+        t_overlap = wvg_length * wvg_neff * 1.2
+        t_total   = sim_length * wvg_neff * 2.0 - t_overlap
 
-    # Run the simulation
-    sim.run(until=sim_length*wvg_neff*2)
-     
-    # Visualize the geometry simulated
-    eps_data = sim.get_array(center=mp.Vector3(0, 0, 0), 
-                            size=cell_size, 
-                            component=mp.Dielectric)
+        # Volumes for DFT collection
+        vol_input = mp.Volume(
+        center=mp.Vector3(-sim_length/2 + wvg_length/2, 0),
+        size=mp.Vector3(wvg_length, sim_width, 0)
+        )
 
-    # Create figure with two subplots
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
-    
-    # LEFT SUBPLOT - Field Propagation Visualization
-    # Plot the material structure
-    ax1.imshow(eps_data.transpose(), interpolation='spline36', cmap='binary', aspect='auto')
-    overlap_axis = np.linspace(-sim_length/2, sim_length/2, len(eps_data))
+        vol_total = mp.Volume(
+        center=mp.Vector3(),
+        size=mp.Vector3(sim_length, sim_width, 0))
 
-    # Extract the fields at the DFT region and compute overlaps
-    for idx, dft in enumerate(dft_arrays):
-        ez_data = sim.get_dft_array(dft, mp.Ez, 0)
-        hy_data = sim.get_dft_array(dft, mp.Hy, 0)
+        # Prepare dft for input
+        dft_in = []
+        for frq in frq_simulated:
+                dft_in.append(
+                        sim.add_dft_fields([mp.Ez, mp.Hy], frq, 0, 1, where=vol_input)
+                )
+
+        # Run only until we have input overlap data (before reflections come back)
+        sim.run(until=t_overlap)
+
+        # Extract stage-1 DFT arrays
+        Ez_in_list = []
+        Hy_in_list = []
+        for dft_obj in dft_in:
+                Ez_in_list.append(sim.get_dft_array(dft_obj, mp.Ez, 0))
+                Hy_in_list.append(sim.get_dft_array(dft_obj, mp.Hy, 0))
+
+        # Prepare dft for output
+        dft_out = []
+        for frq in frq_simulated:
+                dft_out.append(
+                        sim.add_dft_fields([mp.Ez, mp.Hy], frq, 0, 1, where=vol_total)
+                )
+
+        # Continue the simulation until final time
+        sim.run(until=t_total)
         
-        # Overlay field on the left subplot (using transparency to show all)
-        ax1.imshow(np.abs(ez_data).transpose(), interpolation='spline36', 
-                  cmap='RdBu', alpha=0.1, aspect='auto')
+        # Extract stage-2 DFT arrays
+        Ez_out_list = []
+        Hy_out_list = []
+        for dft_obj in dft_out:
+                Ez_out_list.append(sim.get_dft_array(dft_obj, mp.Ez, 0))
+                Hy_out_list.append(sim.get_dft_array(dft_obj, mp.Hy, 0))
+
+        # Extract material from simulation
+        eps_data = sim.get_array(center=mp.Vector3(0, 0, 0),
+                                size=cell_size,
+                                component=mp.Dielectric)
+
+        # Prepare figure
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+
+        # Insert material on left
+        ax1.imshow(eps_data.transpose(), interpolation='spline36', cmap='binary', aspect='auto')
         
-        # Create field axis for the cross section
-        field_axis = np.linspace(-sim_width/2, sim_width/2, len(ez_data[0]))
+        # Build global axis indexing (use rounding-consistent lengths)
+        n_points_input_wvg  = int(round(wvg_length * sim_resolution))
+        n_points_mmi        = int(round(mmi_length * sim_resolution))
+        n_points_output_wvg = int(round(wvg_length * sim_resolution))
+        total_points        = n_points_input_wvg + n_points_mmi + n_points_output_wvg
         
-        # Calculate overlap
-        overlap = SL.calculate_modal_overlap(Ez_cross = Ez1_cross_array[idx], 
-                                            Hy_cross = Hy1_cross_array[idx], 
-                                            Ez_field = ez_data, 
-                                            Hy_field = hy_data,
-                                            cross_axis = cross_axis,
-                                            field_axis = field_axis)
-        
-        # Add overlap to the plot
-        ax2.plot(overlap_axis, overlap, label=f"wvl {wvl_simulated[idx]} nm")
-        
-    # Configure left subplot
-    plt_fontsize = 16
-    ax1.set_title('Field Propagation (Ez)', fontsize=plt_fontsize, fontweight='bold')
-    ax1.set_xlabel('Position [μm]', fontsize=plt_fontsize)
-    ax1.set_ylabel('Width [μm]', fontsize=plt_fontsize)
-    ax1.axis('off')
-    
-    # Add scale bar or position markers
-    ax1.axvline(x=pml_thickness*sim_resolution, color='white', linestyle='--', alpha=0.5, linewidth=1)
-    ax1.axvline(x=(sim_length-pml_thickness)*sim_resolution, color='white', linestyle='--', alpha=0.5, linewidth=1)
-    ax1.text(pml_thickness*sim_resolution, 5, 'PML', color='white', fontsize=plt_fontsize, rotation=90)
-    
-    # RIGHT SUBPLOT - Overlap
-    ax2.set_xlabel('Distance [μm]', fontsize=plt_fontsize)
-    ax2.set_ylabel('Modal Overlap', fontsize=plt_fontsize)
-    ax2.set_title('Modal Overlap vs Wavelength', fontsize=plt_fontsize, fontweight='bold')
-    ax2.grid(True, alpha=0.3)
-    ax2.legend()
-    
-    # Overall title
-    fig.suptitle(f'Waveguide Propagation Analysis (Width = {wvg_width}μm)', 
+        # Prepare the axis used during plot
+        overlap_axis = np.linspace(0, sim_length, total_points)
+        field_axis = np.linspace(-sim_width/2, sim_width/2, sim_width*sim_resolution)
+
+        # Calculate overlap for all the frequency
+        for idx in range(len(frq_simulated)):
+                Ez_in  = Ez_in_list[idx]
+                Hy_in  = Hy_in_list[idx]
+                Ez_out = Ez_out_list[idx]
+                Hy_out = Hy_out_list[idx]
+
+                # Overlap in input (from stage 1)
+                overlap_total = np.zeros(total_points)
+
+                overlap_in = SL.calculate_modal_overlap(
+                        Ez_cross=Ez1_cross_array[idx],
+                        Hy_cross=Hy1_cross_array[idx],
+                        Ez_field=Ez_in,
+                        Hy_field=Hy_in,
+                        cross_axis=cross_axis,
+                        field_axis=field_axis
+                )
+                overlap_total[:n_points_input_wvg] = overlap_in[:n_points_input_wvg]
+
+                # Overlap of MMI can be set to 0 (does not make sense to have overlap here)
+                overlap_total[n_points_input_wvg:n_points_input_wvg + n_points_mmi] = 0
+
+                # Overlap in the output (from stage 2)
+                Ez_out_wg = Ez_out[-n_points_output_wvg:, :]
+                Hy_out_wg = Hy_out[-n_points_output_wvg:, :]
+
+                overlap_out = SL.calculate_modal_overlap(
+                        Ez_cross=Ez1_cross_array[idx],
+                        Hy_cross=Hy1_cross_array[idx],
+                        Ez_field=Ez_out_wg,
+                        Hy_field=Hy_out_wg,
+                        cross_axis=cross_axis + mmi_output_shift,
+                        field_axis=field_axis
+                )
+
+                out_start = n_points_input_wvg + n_points_mmi
+                overlap_total[out_start:] = overlap_out[:n_points_output_wvg]
+                
+                # Visualize field and overlap
+                ax1.imshow(np.abs(Ez_out).transpose(),
+                        interpolation='spline36',
+                        cmap='RdBu',
+                        aspect='auto',
+                        alpha=1 / wvl_n)
+
+                ax2.plot(overlap_axis, overlap_total, label=f"{wvl_simulated[idx]:.0f} nm")
+                                
+        plt_fontsize = 16
+        ax1.set_title('Geometry', fontsize=plt_fontsize, fontweight='bold')
+        ax1.set_xlabel('Position [μm]', fontsize=plt_fontsize)
+        ax1.set_ylabel('Width [μm]', fontsize=plt_fontsize)
+        ax1.axis('off')
+
+        ax2.set_xlabel('Distance [μm]', fontsize=plt_fontsize)
+        ax2.set_ylabel('Modal Overlap', fontsize=plt_fontsize)
+        ax2.set_title('Modal Overlap (2-stage run)', fontsize=plt_fontsize, fontweight='bold')
+        ax2.axvline(x=wvg_length, color='gray', linestyle='--', alpha=0.5, linewidth=1)
+        ax2.axvline(x=wvg_length + mmi_length, color='gray', linestyle='--', alpha=0.5, linewidth=1)
+        ax2.grid(True, alpha=0.3)
+        ax2.legend()
+
+        fig.suptitle(f'Waveguide Propagation Analysis (Width = {wvg_width} μm)',
                 fontsize=16, fontweight='bold')
-    
-    plt.show()
 
-    
+        plt.show()
