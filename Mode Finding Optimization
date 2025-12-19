@@ -443,226 +443,299 @@ if not propagation_coupler:
 ###  5 - Propagate light in a MMI to see its overlap          ###
 #################################################################
 if not propagation_mmi:
+        # Define mmi length to simulate
+        mmi_lengths = [40, 14.5, 14.75, 15, 15.25, 15.5]   #(μm)
+        # Fixed spectral parameters
         wvl_min = 1530 # nm
         wvl_max = 1565 # nm
-        wvl_n = 2
-        wvl_simulated = np.linspace(wvl_min, wvl_max, wvl_n)
-        frq_simulated = 1000 / wvl_simulated
+        wvl_n = 8
+        frq_simulated = np.linspace(1000 / wvl_max, 1000 / wvl_min, wvl_n)
 
-        # Geometry parameters
-        sim_length = 50
+        # Fixed simulation/global parameters
         sim_width = 6
-        sim_resolution = 20
+        sim_resolution = 30
         pml_thickness = 1
         wvg_neff = 3
         cld_neff = 1.3
-
-        # Define building block_geometry
         mmi_width = 4
-        mmi_output_shift = mmi_width / 3
-        mmi_length = 5
-        wvg_width = 0.3 
-        wvg_length = (sim_length - mmi_length) / 2
-
-        # Create the geometry
-        geometry = [
-                # Background
-                mp.Block(size=mp.Vector3(sim_length, sim_width, 0),
-                        center=mp.Vector3(),
-                        material=mp.Medium(epsilon=cld_neff**2)),
-                # Input waveguide
-                mp.Block(size=mp.Vector3(wvg_length, wvg_width, 0),
-                        center=mp.Vector3(-sim_length/2+wvg_length/2),
-                        material=mp.Medium(epsilon=wvg_neff**2)),
-                # MMI section
-                mp.Block(size=mp.Vector3(mmi_length, mmi_width, 0),
-                        center=mp.Vector3(),
-                        material=mp.Medium(epsilon=wvg_neff**2)),
-                # Top waveguide output
-                mp.Block(size=mp.Vector3(wvg_length, wvg_width, 0),
-                        center=mp.Vector3(sim_length/2-wvg_length/2, mmi_output_shift),
-                        material=mp.Medium(epsilon=wvg_neff**2)),
-                # Bottom waveguide output
-                mp.Block(size=mp.Vector3(wvg_length, wvg_width, 0),
-                        center=mp.Vector3(sim_length/2-wvg_length/2, -mmi_output_shift),
-                        material=mp.Medium(epsilon=wvg_neff**2))]
-
-        # Calculate the cell size and position
-        cell_size, cell_center = SL.compute_geometry_bounds(geometry)
+        wvg_width = 0.3
+        mmi_output_shift = mmi_width / 4
 
         # Boundary condition
         pml_layers = [mp.PML(pml_thickness)]
 
-        # Initialize all arrays
-        Ez1_cross_array = []
-        Hy1_cross_array = []
-        sources = []
+        # Perform the same operation on different mmi_lengths
+        results = []
+        for mmi_length in mmi_lengths:
+                # Adjust length to have enough space for waveguide
+                sim_length = mmi_length + 25
+                wvg_length = (sim_length - mmi_length) / 2
 
-        # Load all data
-        for wvl, frq in zip(wvl_simulated, frq_simulated):
-                with open(f"Output/Mode_ex_width{wvg_width}_wavelength{wvl:.0f}nm.json", "r") as f:
-                        data = json.load(f)
-                        Ez1_cross = np.array(data["Ez"])
-                        Hy1_cross = np.array(data["Hy"])
-                        cross_axis = np.array(data["cross_axis"])
+                # Geometry
+                geometry = [
+                        mp.Block(size=mp.Vector3(sim_length, sim_width, 0),
+                                center=mp.Vector3(),
+                                material=mp.Medium(epsilon=cld_neff**2)),
 
-                Ez1_cross_array.append(Ez1_cross)
-                Hy1_cross_array.append(Hy1_cross)
+                        mp.Block(size=mp.Vector3(wvg_length, wvg_width, 0),
+                                center=mp.Vector3(-sim_length/2 + wvg_length/2),
+                                material=mp.Medium(epsilon=wvg_neff**2)),
+
+                        mp.Block(size=mp.Vector3(mmi_length, mmi_width, 0),
+                                center=mp.Vector3(),
+                                material=mp.Medium(epsilon=wvg_neff**2)),
+
+                        mp.Block(size=mp.Vector3(wvg_length, wvg_width, 0),
+                                center=mp.Vector3(sim_length/2 - wvg_length/2,  mmi_output_shift),
+                                material=mp.Medium(epsilon=wvg_neff**2)),
+
+                        mp.Block(size=mp.Vector3(wvg_length, wvg_width, 0),
+                                center=mp.Vector3(sim_length/2 - wvg_length/2, -mmi_output_shift),
+                                material=mp.Medium(epsilon=wvg_neff**2)),
+                ]
                 
-                # Create a source with the mode just loaded
-                source = SL.generate_modal_source(
-                        Ez_cross=Ez1_cross,
-                        Hy_cross=Hy1_cross,
-                        cross_axis=np.linspace(-sim_width/2, sim_width/2, len(Ez1_cross)),
-                        src_position=mp.Vector3(-sim_length / 2 + pml_thickness),
-                        src_size=mp.Vector3(0, sim_width),
-                        frequency=frq
-                )
-                sources.append(source[0])
-                sources.append(source[1])
+                # Compute the geometry boundary
+                cell_size, cell_center = SL.compute_geometry_bounds(geometry)
 
+                # Load mode fields & build sources (per frequency)
+                Ez1_cross_array = []
+                Hy1_cross_array = []
+                sources = []
 
-        # Simulation settings preparation
-        sim = mp.Simulation(
-        cell_size=cell_size,
-        sources=sources,
-        geometry=geometry,
-        resolution=sim_resolution,
-        boundary_layers=pml_layers
-        )
-
-        # Times for simulation (different for initial and final overlap)
-        t_overlap = wvg_length * wvg_neff * 1.2
-        t_total   = sim_length * wvg_neff * 2.0 - t_overlap
-
-        # Volumes for DFT collection
-        vol_input = mp.Volume(
-        center=mp.Vector3(-sim_length/2 + wvg_length/2, 0),
-        size=mp.Vector3(wvg_length, sim_width, 0)
-        )
-
-        vol_total = mp.Volume(
-        center=mp.Vector3(),
-        size=mp.Vector3(sim_length, sim_width, 0))
-
-        # Prepare dft for input
-        dft_in = []
-        for frq in frq_simulated:
-                dft_in.append(
-                        sim.add_dft_fields([mp.Ez, mp.Hy], frq, 0, 1, where=vol_input)
-                )
-
-        # Run only until we have input overlap data (before reflections come back)
-        sim.run(until=t_overlap)
-
-        # Extract stage-1 DFT arrays
-        Ez_in_list = []
-        Hy_in_list = []
-        for dft_obj in dft_in:
-                Ez_in_list.append(sim.get_dft_array(dft_obj, mp.Ez, 0))
-                Hy_in_list.append(sim.get_dft_array(dft_obj, mp.Hy, 0))
-
-        # Prepare dft for output
-        dft_out = []
-        for frq in frq_simulated:
-                dft_out.append(
-                        sim.add_dft_fields([mp.Ez, mp.Hy], frq, 0, 1, where=vol_total)
-                )
-
-        # Continue the simulation until final time
-        sim.run(until=t_total)
-        
-        # Extract stage-2 DFT arrays
-        Ez_out_list = []
-        Hy_out_list = []
-        for dft_obj in dft_out:
-                Ez_out_list.append(sim.get_dft_array(dft_obj, mp.Ez, 0))
-                Hy_out_list.append(sim.get_dft_array(dft_obj, mp.Hy, 0))
-
-        # Extract material from simulation
-        eps_data = sim.get_array(center=mp.Vector3(0, 0, 0),
-                                size=cell_size,
-                                component=mp.Dielectric)
-
-        # Prepare figure
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
-
-        # Insert material on left
-        ax1.imshow(eps_data.transpose(), interpolation='spline36', cmap='binary', aspect='auto')
-        
-        # Build global axis indexing (use rounding-consistent lengths)
-        n_points_input_wvg  = int(round(wvg_length * sim_resolution))
-        n_points_mmi        = int(round(mmi_length * sim_resolution))
-        n_points_output_wvg = int(round(wvg_length * sim_resolution))
-        total_points        = n_points_input_wvg + n_points_mmi + n_points_output_wvg
-        
-        # Prepare the axis used during plot
-        overlap_axis = np.linspace(0, sim_length, total_points)
-        field_axis = np.linspace(-sim_width/2, sim_width/2, sim_width*sim_resolution)
-
-        # Calculate overlap for all the frequency
-        for idx in range(len(frq_simulated)):
-                Ez_in  = Ez_in_list[idx]
-                Hy_in  = Hy_in_list[idx]
-                Ez_out = Ez_out_list[idx]
-                Hy_out = Hy_out_list[idx]
-
-                # Overlap in input (from stage 1)
-                overlap_total = np.zeros(total_points)
-
-                overlap_in = SL.calculate_modal_overlap(
-                        Ez_cross=Ez1_cross_array[idx],
-                        Hy_cross=Hy1_cross_array[idx],
-                        Ez_field=Ez_in,
-                        Hy_field=Hy_in,
-                        cross_axis=cross_axis,
-                        field_axis=field_axis
-                )
-                overlap_total[:n_points_input_wvg] = overlap_in[:n_points_input_wvg]
-
-                # Overlap of MMI can be set to 0 (does not make sense to have overlap here)
-                overlap_total[n_points_input_wvg:n_points_input_wvg + n_points_mmi] = 0
-
-                # Overlap in the output (from stage 2)
-                Ez_out_wg = Ez_out[-n_points_output_wvg:, :]
-                Hy_out_wg = Hy_out[-n_points_output_wvg:, :]
-
-                overlap_out = SL.calculate_modal_overlap(
-                        Ez_cross=Ez1_cross_array[idx],
-                        Hy_cross=Hy1_cross_array[idx],
-                        Ez_field=Ez_out_wg,
-                        Hy_field=Hy_out_wg,
-                        cross_axis=cross_axis + mmi_output_shift,
-                        field_axis=field_axis
-                )
-
-                out_start = n_points_input_wvg + n_points_mmi
-                overlap_total[out_start:] = overlap_out[:n_points_output_wvg]
-                
-                # Visualize field and overlap
-                ax1.imshow(np.abs(Ez_out).transpose(),
-                        interpolation='spline36',
-                        cmap='RdBu',
-                        aspect='auto',
-                        alpha=1 / wvl_n)
-
-                ax2.plot(overlap_axis, overlap_total, label=f"{wvl_simulated[idx]:.0f} nm")
+                for frq in frq_simulated:
+                        # Load the file
+                        with open(f"Output/Mode_ex_width{wvg_width}_frequency{frq:.3f}nm.json", "r") as f:
+                                data = json.load(f)
                                 
+                                # Extract the files
+                                Ez1_cross = np.array(data["Ez"])
+                                Hy1_cross = np.array(data["Hy"])
+                                Ez1_cross_array.append(Ez1_cross)
+                                Hy1_cross_array.append(Hy1_cross)
+                                
+                                # Create the source of the simulation
+                                source = SL.generate_modal_source(
+                                        Ez_cross=Ez1_cross,
+                                        Hy_cross=Hy1_cross,
+                                        cross_axis=np.linspace(-sim_width/2, sim_width/2, len(Ez1_cross)),
+                                        src_position=mp.Vector3(-sim_length/2 + pml_thickness),
+                                        src_size=mp.Vector3(0, sim_width),
+                                        frequency=frq)
+
+                                sources.append(source[0])
+                                sources.append(source[1])
+                
+                # Fixed Simulation settings
+                sim = mp.Simulation(
+                cell_size=cell_size,
+                sources=sources,
+                geometry=geometry,
+                resolution=sim_resolution,
+                boundary_layers=pml_layers)
+
+                # Times
+                t_overlap = wvg_length * wvg_neff * 1.2
+                t_total   = sim_length * wvg_neff * 2.0 - t_overlap
+
+                # Volumes
+                vol_input = mp.Volume(
+                        center=mp.Vector3(-sim_length/2 + wvg_length/2, 0),
+                        size=mp.Vector3(wvg_length, sim_width, 0))
+
+                vol_total = mp.Volume(
+                        center=mp.Vector3(),
+                        size=mp.Vector3(sim_length, sim_width, 0))
+
+                # Stage 1 DFT
+                dft_in = sim.add_dft_fields([mp.Ez, mp.Hy], frq_simulated, where=vol_input)
+                sim.run(until=t_overlap)
+
+                Ez_in_list = [sim.get_dft_array(dft_in, mp.Ez, i) for i in range(wvl_n)]
+                Hy_in_list = [sim.get_dft_array(dft_in, mp.Hy, i) for i in range(wvl_n)]
+
+                # Stage 2 DFT
+                dft_out = sim.add_dft_fields([mp.Ez, mp.Hy], frq_simulated, where=vol_total)
+                sim.run(until=t_total)
+
+                Ez_out_list = [sim.get_dft_array(dft_out, mp.Ez, i) for i in range(wvl_n)]
+                Hy_out_list = [sim.get_dft_array(dft_out, mp.Hy, i) for i in range(wvl_n)]
+
+                # Material for plotting
+                eps_data = sim.get_array(center=mp.Vector3(0, 0, 0),
+                                        size=cell_size,
+                                        component=mp.Dielectric)
+
+                # Axes/discretization (recomputed because wvg_length depends on mmi_length)
+                n_points_input_wvg  = int(round(wvg_length * sim_resolution))
+                n_points_mmi        = int(round(mmi_length * sim_resolution))
+                n_points_output_wvg = int(round(wvg_length * sim_resolution))
+                total_points        = n_points_input_wvg + n_points_mmi + n_points_output_wvg
+
+                overlap_axis = np.linspace(0, sim_length, total_points)
+                field_axis = np.linspace(-sim_width/2, sim_width/2, sim_width * sim_resolution)
+                cross_axis = np.linspace(-sim_width/2, sim_width/2, len(Ez1_cross))
+
+                # Compute overlaps for each frequency (store final curves)
+                overlap_totals = []
+                for idx in range(wvl_n):
+                        # Extract the field calculated
+                        Ez_in  = Ez_in_list[idx]
+                        Hy_in  = Hy_in_list[idx]
+                        Ez_out = Ez_out_list[idx]
+                        Hy_out = Hy_out_list[idx]
+                        
+                        # Initialize the overlap
+                        overlap_total = np.zeros(total_points)
+
+                        # Calculate the overlap at the input
+                        overlap_in = SL.calculate_modal_overlap(
+                                Ez_cross=Ez1_cross_array[idx],
+                                Hy_cross=Hy1_cross_array[idx],
+                                Ez_field=Ez_in,
+                                Hy_field=Hy_in,
+                                cross_axis=cross_axis,
+                                field_axis=field_axis)
+                        overlap_total[:n_points_input_wvg] = overlap_in[:n_points_input_wvg]
+                        
+                        # The overlap at the MMI is set to 0 since does not make sense
+                        overlap_total[n_points_input_wvg:n_points_input_wvg + n_points_mmi] = 0
+
+                        # Calculate the overlap a
+                        overlap_out = SL.calculate_modal_overlap(
+                                Ez_cross=Ez1_cross_array[idx],
+                                Hy_cross=Hy1_cross_array[idx],
+                                Ez_field=Ez_out,
+                                Hy_field=Hy_out,
+                                cross_axis=cross_axis + mmi_output_shift,
+                                field_axis=field_axis)
+                        
+                        try:
+                                overlap_total[n_points_input_wvg + n_points_mmi:] = overlap_out[n_points_input_wvg + n_points_mmi:]
+                        except ValueError:
+                                overlap_total[n_points_input_wvg + n_points_mmi - 1:] = overlap_out[n_points_input_wvg + n_points_mmi:]
+                        overlap_totals.append(overlap_total)
+
+                # Build a single overlay image (so we can update one artist instead of stacking many)
+                Ez_overlay = np.abs(np.sum([Ez for Ez in Ez_out_list], axis=0))
+
+                results.append({
+                        "mmi_length": mmi_length,
+                        "wvg_length": wvg_length,
+                        "eps_data": eps_data,
+                        "Ez_overlay": Ez_overlay,
+                        "overlap_axis": overlap_axis,
+                        "overlap_totals": overlap_totals,  
+                        "field_axis": field_axis})
+
+        # Initialize the plot
         plt_fontsize = 16
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+        
+        # Initialize the state of the plot
+        state = {"k": 0} 
+
+        # Initialize with first result
+        r0 = results[0]
+        
+        # Create the first image (material + field)
+        eps_im = ax1.imshow(r0["eps_data"].transpose(),
+                        interpolation='spline36', cmap='binary', aspect='auto')
+
+        field_im = ax1.imshow(r0["Ez_overlay"].transpose(),
+                        interpolation='spline36', cmap='RdBu',
+                        aspect='auto', alpha=0.6)
+
+        # Setting of first axis
         ax1.set_title('Geometry', fontsize=plt_fontsize, fontweight='bold')
         ax1.set_xlabel('Position [μm]', fontsize=plt_fontsize)
         ax1.set_ylabel('Width [μm]', fontsize=plt_fontsize)
         ax1.axis('off')
 
+        # Plot of the second axis
+        lines = []
+        for idx, frq in enumerate(frq_simulated):
+                (ln,) = ax2.plot(r0["overlap_axis"], r0["overlap_totals"][idx],
+                                label=f"{frq:.3f} Thz/c")
+                lines.append(ln)
+        
+        # Setting of the second axis
+        vline1 = ax2.axvline(x=r0["wvg_length"], color='gray', linestyle='--', alpha=0.5, linewidth=1)
+        vline2 = ax2.axvline(x=r0["wvg_length"] + r0["mmi_length"], color='gray', linestyle='--', alpha=0.5, linewidth=1)
         ax2.set_xlabel('Distance [μm]', fontsize=plt_fontsize)
         ax2.set_ylabel('Modal Overlap', fontsize=plt_fontsize)
         ax2.set_title('Modal Overlap (2-stage run)', fontsize=plt_fontsize, fontweight='bold')
-        ax2.axvline(x=wvg_length, color='gray', linestyle='--', alpha=0.5, linewidth=1)
-        ax2.axvline(x=wvg_length + mmi_length, color='gray', linestyle='--', alpha=0.5, linewidth=1)
+        ax2.tick_params(axis='both', which='major', labelsize=plt_fontsize)
         ax2.grid(True, alpha=0.3)
         ax2.legend()
 
-        fig.suptitle(f'Waveguide Propagation Analysis (Width = {wvg_width} μm)',
+        fig.suptitle(f'Waveguide Propagation Analysis (Width = {wvg_width} μm) | MMI length = {r0["mmi_length"]} μm',
                 fontsize=16, fontweight='bold')
+
+        # Create a function to change resulting plot
+        def update_plot(k):
+                # Take results 
+                r = results[k]
+
+                # Recreate the image
+                eps_im.set_data(r["eps_data"].transpose())
+                field_im.set_data(r["Ez_overlay"].transpose())
+
+                # Recreate the overlap
+                for i, ln in enumerate(lines):
+                        ln.set_data(r["overlap_axis"], r["overlap_totals"][i])
+                vline1.set_xdata([r["wvg_length"], r["wvg_length"]])
+                vline2.set_xdata([r["wvg_length"] + r["mmi_length"], r["wvg_length"] + r["mmi_length"]])
+
+                # Redraw and change settings
+                ax2.relim()
+                ax2.autoscale_view()
+                fig.suptitle(f'Waveguide Propagation Analysis (Width = {wvg_width} μm) | MMI length = {r["mmi_length"]} μm',
+                                fontsize=16, fontweight='bold')
+                fig.canvas.draw_idle()
+
+        # Right button
+        btn_ax_right = fig.add_axes([0.92, 0.475, 0.06, 0.08])
+        btn_right = Button(btn_ax_right, "", color="white", hovercolor="0.9")
+
+        # Left button (slightly outside)
+        btn_ax_left = fig.add_axes([0.02, 0.475, 0.06, 0.08])
+        btn_left = Button(btn_ax_left, "", color="white", hovercolor="0.9")
+
+        # Right-pointing triangle
+        tri_right = plt.Polygon(
+                [[0.30, 0.20], [0.30, 0.80], [0.75, 0.50]],
+                closed=True,
+                transform=btn_ax_right.transAxes,
+                facecolor="black",
+                edgecolor="black")
+        btn_ax_right.add_patch(tri_right)
+
+        # Left-pointing triangle (mirrored)
+        tri_left = plt.Polygon(
+                [[0.70, 0.20], [0.70, 0.80], [0.25, 0.50]],
+                closed=True,
+                transform=btn_ax_left.transAxes,
+                facecolor="black",
+                edgecolor="black")
+        btn_ax_left.add_patch(tri_left)
+
+        # Clean button axes
+        for ax in (btn_ax_right, btn_ax_left):
+                _ = ax.set_xticks([])
+                _ = ax.set_yticks([])
+        for spine in ax.spines.values():
+                spine.set_visible(False)
+
+        # Callbacks
+        def on_button_right(event):
+                state["k"] = (state["k"] + 1) % len(results)
+                update_plot(state["k"])
+
+        def on_button_left(event):
+                state["k"] = (state["k"] - 1) % len(results)
+                update_plot(state["k"])
+
+        _ = btn_right.on_clicked(on_button_right)
+        _ = btn_left.on_clicked(on_button_left)
 
         plt.show()
