@@ -446,7 +446,7 @@ def calculate_modal_overlap(Ez_cross, Hy_cross, Ez_field, Hy_field, cross_axis=N
         Hy_cross = Hy_cross_interp(field_axis)
 
     # Calculate the overlap integral as the power between the modes and the fields.
-    overlap = 0.5 * np.sum(np.abs(Ez_cross * np.conj(Hy_field) + Hy_cross * np.conj(Ez_field)), axis=1)
+    overlap = 0.5 * np.sum(Ez_cross * np.conj(Hy_field) + Hy_cross * np.conj(Ez_field), axis=1)
 
     # Calculate the normalization factor the the mode
     mode_norm = np.sqrt(np.abs(np.sum((Ez_cross * np.conj(Hy_cross)))))
@@ -454,9 +454,9 @@ def calculate_modal_overlap(Ez_cross, Hy_cross, Ez_field, Hy_field, cross_axis=N
     # Calculate the normalization factor for the fields, based on the maximum Ez field position
     x_imax = np.argmax(np.real(Ez_field))
     x_max_index, _ = np.unravel_index(x_imax, Ez_field.shape)
-    field_norm = np.sqrt(np.abs(np.sum((Ez_field[x_max_index] * np.conj(Hy_field[x_max_index])))))
+    field_norm = np.sqrt(np.abs(np.sum(Ez_field[x_max_index] * np.conj(Hy_field[x_max_index]))))
 
     # Normalize the overlap
-    overlap_norm = abs(overlap / mode_norm / field_norm)
+    overlap_norm = abs(overlap / mode_norm / field_norm)**2
 
     return overlap_norm
