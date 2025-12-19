@@ -535,7 +535,7 @@ if not propagation_mmi:
 
                 # Times
                 t_overlap = wvg_length * wvg_neff * 1.2
-                t_total   = sim_length * wvg_neff * 2.0 - t_overlap
+                t_total   = sim_length * wvg_neff * 2.0
 
                 # Volumes
                 vol_input = mp.Volume(
