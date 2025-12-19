@@ -241,7 +241,8 @@ if not propagation_waveguide:
         
         # LEFT SUBPLOT - Field Propagation Visualization
         # Plot the material structure
-        ax1.imshow(eps_data.transpose(), interpolation='spline36', cmap='binary', aspect='auto')
+        ax1.imshow(eps_data.transpose(), interpolation='spline36', 
+                   cmap='binary', aspect='auto', extent=(0, sim_length, 0, sim_width))
         overlap_axis = np.linspace(-sim_length/2, sim_length/2, len(eps_data))
 
         # Extract the fields at the DFT region and compute overlaps
@@ -251,7 +252,8 @@ if not propagation_waveguide:
                 
                 # Overlay field on the left subplot (using transparency to show all)
                 ax1.imshow(np.abs(ez_data).transpose(), interpolation='spline36', 
-                        cmap='RdBu', alpha=0.1, aspect='auto')
+                        cmap='RdBu', alpha=1/wvl_n, aspect='auto', 
+                        extent=(0, sim_length, 0, sim_width))
                 
                 # Create field axis for the cross section
                 field_axis = np.linspace(-sim_width/2, sim_width/2, len(ez_data[0]))
@@ -275,9 +277,9 @@ if not propagation_waveguide:
         ax1.axis('off')
         
         # Add scale bar or position markers
-        ax1.axvline(x=pml_thickness*sim_resolution, color='white', linestyle='--', alpha=0.5, linewidth=1)
-        ax1.axvline(x=(sim_length-pml_thickness)*sim_resolution, color='white', linestyle='--', alpha=0.5, linewidth=1)
-        ax1.text(pml_thickness*sim_resolution, 5, 'PML', color='white', fontsize=plt_fontsize, rotation=90)
+        ax1.axvline(x=pml_thickness, color='white', linestyle='--', alpha=0.5, linewidth=1)
+        ax1.axvline(x=sim_length-pml_thickness, color='white', linestyle='--', alpha=0.5, linewidth=1)
+        ax1.text(x=-3*pml_thickness+sim_length, y=4, s='PML', color='white', fontsize=plt_fontsize, rotation=90)
         
         # RIGHT SUBPLOT - Overlap
         ax2.set_xlabel('Distance [μm]', fontsize=plt_fontsize)
@@ -386,7 +388,8 @@ if not propagation_coupler:
 
         # LEFT SUBPLOT - Field Propagation Visualization
         # Plot the material structure
-        ax1.imshow(eps_data.transpose(), interpolation='spline36', cmap='binary', aspect='auto')
+        ax1.imshow(eps_data.transpose(), interpolation='spline36', cmap='binary', aspect='auto',
+                   extent=(0, sim_length, 0, sim_width))
         overlap_axis = np.linspace(0, sim_length, len(eps_data))
 
         # Extract the fields at the DFT region and compute overlaps
@@ -396,7 +399,8 @@ if not propagation_coupler:
 
                 # Overlay field on the left subplot (using transparency to show all)
                 ax1.imshow(np.abs(ez_data).transpose(), interpolation='spline36', 
-                                cmap='RdBu', alpha=0.1, aspect='auto')
+                                cmap='RdBu', alpha=0.1, aspect='auto',
+                                extent=(0, sim_length, 0, sim_width))
 
                 # Create field axis for the cross section
                 field_axis = np.linspace(-sim_width/2, sim_width/2, len(ez_data[0]))
@@ -420,9 +424,9 @@ if not propagation_coupler:
         ax1.axis('off')
 
         # Add scale bar or position markers
-        ax1.axvline(x=pml_thickness*sim_resolution, color='white', linestyle='--', alpha=0.5, linewidth=1)
-        ax1.axvline(x=(sim_length-pml_thickness)*sim_resolution, color='white', linestyle='--', alpha=0.5, linewidth=1)
-        ax1.text(pml_thickness*sim_resolution, 5, 'PML', color='white', fontsize=plt_fontsize, rotation=90)
+        ax1.axvline(x=pml_thickness, color='white', linestyle='--', alpha=0.5, linewidth=1)
+        ax1.axvline(x=sim_length-pml_thickness, color='white', linestyle='--', alpha=0.5, linewidth=1)
+        ax1.text(x=-3*pml_thickness+sim_length, y=4, s='PML', color='white', fontsize=plt_fontsize, rotation=90)
 
         # RIGHT SUBPLOT - Overlap
         ax2.set_xlabel('Distance [μm]', fontsize=plt_fontsize)
@@ -445,6 +449,7 @@ if not propagation_coupler:
 if not propagation_mmi:
         # Define mmi length to simulate
         mmi_lengths = [40, 14.5, 14.75, 15, 15.25, 15.5]   #(μm)
+
         # Fixed spectral parameters
         wvl_min = 1530 # nm
         wvl_max = 1565 # nm
@@ -543,8 +548,8 @@ if not propagation_mmi:
                         size=mp.Vector3(wvg_length, sim_width, 0))
 
                 vol_total = mp.Volume(
-                        center=mp.Vector3(),
-                        size=mp.Vector3(sim_length, sim_width, 0))
+                        center=mp.Vector3(wvg_length/2),
+                        size=mp.Vector3(sim_length-wvg_length, sim_width, 0))
 
                 # Stage 1 DFT
                 dft_in = sim.add_dft_fields([mp.Ez, mp.Hy], frq_simulated, where=vol_input)
@@ -556,7 +561,6 @@ if not propagation_mmi:
                 # Stage 2 DFT
                 dft_out = sim.add_dft_fields([mp.Ez, mp.Hy], frq_simulated, where=vol_total)
                 sim.run(until=t_total)
-
                 Ez_out_list = [sim.get_dft_array(dft_out, mp.Ez, i) for i in range(wvl_n)]
                 Hy_out_list = [sim.get_dft_array(dft_out, mp.Hy, i) for i in range(wvl_n)]
 
@@ -577,12 +581,15 @@ if not propagation_mmi:
 
                 # Compute overlaps for each frequency (store final curves)
                 overlap_totals = []
+                Ez_list = []
                 for idx in range(wvl_n):
                         # Extract the field calculated
                         Ez_in  = Ez_in_list[idx]
                         Hy_in  = Hy_in_list[idx]
                         Ez_out = Ez_out_list[idx]
                         Hy_out = Hy_out_list[idx]
+                        Ez = np.concatenate([Ez_in, Ez_out], axis=0)
+                        Ez_list.append(Ez)
                         
                         # Initialize the overlap
                         overlap_total = np.zeros(total_points)
@@ -609,14 +616,11 @@ if not propagation_mmi:
                                 cross_axis=cross_axis + mmi_output_shift,
                                 field_axis=field_axis)
                         
-                        try:
-                                overlap_total[n_points_input_wvg + n_points_mmi:] = overlap_out[n_points_input_wvg + n_points_mmi:]
-                        except ValueError:
-                                overlap_total[n_points_input_wvg + n_points_mmi - 1:] = overlap_out[n_points_input_wvg + n_points_mmi:]
+                        overlap_total[(len(overlap_total)-len(overlap_out[n_points_mmi:])):] = overlap_out[n_points_mmi:]
                         overlap_totals.append(overlap_total)
 
                 # Build a single overlay image (so we can update one artist instead of stacking many)
-                Ez_overlay = np.abs(np.sum([Ez for Ez in Ez_out_list], axis=0))
+                Ez_overlay = np.sum([np.abs(Ez) for Ez in Ez_list], axis=0)
 
                 results.append({
                         "mmi_length": mmi_length,
@@ -639,11 +643,13 @@ if not propagation_mmi:
         
         # Create the first image (material + field)
         eps_im = ax1.imshow(r0["eps_data"].transpose(),
-                        interpolation='spline36', cmap='binary', aspect='auto')
+                        interpolation='spline36', cmap='binary', aspect='auto',
+                        extent=(0, sim_length, 0, sim_width))
 
         field_im = ax1.imshow(r0["Ez_overlay"].transpose(),
                         interpolation='spline36', cmap='RdBu',
-                        aspect='auto', alpha=0.6)
+                        aspect='auto', alpha=1,
+                        extent=(0, sim_length, 0, sim_width))
 
         # Setting of first axis
         ax1.set_title('Geometry', fontsize=plt_fontsize, fontweight='bold')
@@ -667,6 +673,7 @@ if not propagation_mmi:
         ax2.tick_params(axis='both', which='major', labelsize=plt_fontsize)
         ax2.grid(True, alpha=0.3)
         ax2.legend()
+        ax2.set_ylim(-0.1, 1.1) 
 
         fig.suptitle(f'Waveguide Propagation Analysis (Width = {wvg_width} μm) | MMI length = {r0["mmi_length"]} μm',
                 fontsize=16, fontweight='bold')
