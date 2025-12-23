@@ -6,10 +6,11 @@ import meep as mp
 import json 
 
 width_found = True
-mode_calculated = True
+mode_calculated_kind = 'none' # Chose one between 'none', 'wvg', 'fiber'
+mode_calculated = (mode_calculated_kind == 'none')
 propagation_waveguide = True
 propagation_coupler = True
-propagation_mmi = False
+propagation_mmi = True
 propagation_taper = False
 propagation_ring = False
 
@@ -89,13 +90,13 @@ if not mode_calculated:
 
         # Geometry parameters
         sim_length = 5
-        sim_width = 5
+        sim_width = 5 if mode_calculated == 'wvg' else 20
         sim_resolution = 40
-        wvg_neff = 3
-        cld_neff = 1.3
+        wvg_neff = 3 if mode_calculated == 'wvg' else 1.46
+        cld_neff = 1.3 if mode_calculated == 'wvg' else 1.44
 
         # Define fixed waveguide width
-        wvg_width = 0.3 
+        wvg_width = 0.3 if mode_calculated == 'wvg' else 4.5
 
         # Create single figure
         fig, ax = plt.subplots(1, 1, figsize=(12, 8))
@@ -135,12 +136,16 @@ if not mode_calculated:
                 }
 
                 # Save individual file
-                with open(f"Output/Mode_ex_width{wvg_width}_frequency{frq:.3f}nm.json", "w") as f:
+                file_name_wvg = f"Output/Mode_ex_width{wvg_width}_frequency{frq:.3f}nm.json"
+                file_name_fiber = f"Output/Mode_ex_fiber_frequency{frq:.3f}nm.json"
+                with open(file_name_wvg if mode_calculated == 'wvg' else file_name_fiber, "w") as f:
                         json.dump(data, f)
 
                 # Configure plot with larger fonts
                 plt_fontsize = 16
-                ax.set_title(f'Ez Mode Profile for Width={wvg_width}μm at Different Wavelengths', 
+                title_name_wvg = f"Ez Mode Profile for Width={wvg_width}μm at Different Wavelengths"
+                title_name_fiber = f"Ez Mode Profile for Fiber at Different Wavelengths"
+                ax.set_title(title_name_wvg if mode_calculated == 'wvg' else title_name_fiber, 
                         fontsize=plt_fontsize, fontweight='bold')
                 ax.set_xlabel('Position [μm]', fontsize=plt_fontsize)
                 ax.set_ylabel('Normalized Field', fontsize=plt_fontsize)
@@ -744,5 +749,267 @@ if not propagation_mmi:
 
         _ = btn_right.on_clicked(on_button_right)
         _ = btn_left.on_clicked(on_button_left)
+
+        plt.show()
+        
+#################################################################
+###  6 - Propagate light in a subresolution taper             ###
+#################################################################
+def moving_window_simulation(simulation,
+                             window_spawn_time,
+                             window_distance,
+                             frequencies,
+                             window_width,
+                             max_time_window,
+                             max_time_simulation):
+
+    t = 0.0
+    dft_arrays = []
+    t_spawn_arrays = []
+    n_dft = 0
+
+    # store per-frequency list of window-arrays
+    Ez_per_freq_windows = [[] for _ in frequencies]
+    Hy_per_freq_windows = [[] for _ in frequencies]
+
+    while t < max_time_simulation:
+        # 1) spawn new dft
+        vol = mp.Volume(center=mp.Vector3(window_distance * (n_dft + 1)),
+                        size=mp.Vector3(0, window_width))
+
+        dft = simulation.add_dft_fields([mp.Ez, mp.Hy], frequencies, where=vol)
+        dft_arrays.append(dft)
+        t_spawn_arrays.append(t)
+        n_dft += 1
+
+        # 2) advance time
+        simulation.run(until=window_spawn_time)
+        t += window_spawn_time
+
+        # 3) if the oldest window is old enough, finalize it (can be while, not if)
+        while dft_arrays and (t - t_spawn_arrays[0] >= max_time_window):
+            # read once (one array per frequency)
+            for i in range(len(frequencies)):
+                Ez_arr = simulation.get_dft_array(dft_arrays[0], mp.Ez, i)
+                Hy_arr = simulation.get_dft_array(dft_arrays[0], mp.Hy, i)  # <- FIX
+
+                Ez_per_freq_windows[i].append(Ez_arr)
+                Hy_per_freq_windows[i].append(Hy_arr)
+
+            # remove monitor + pop bookkeeping
+            simulation.dft_objects.pop(0)
+            dft_arrays.pop(0)
+            t_spawn_arrays.pop(0)  # <- FIX
+
+    # 4) build the final "matrix per frequency" by concatenating windows in order
+    # NOTE: axis=0 is typical; if your arrays are shaped differently, you may need axis=1.
+    Ez_matrices = [np.concatenate(Ez_per_freq_windows[i], axis=0) if Ez_per_freq_windows[i] else None
+                   for i in range(len(frequencies))]
+    Hy_matrices = [np.concatenate(Hy_per_freq_windows[i], axis=0) if Hy_per_freq_windows[i] else None
+                   for i in range(len(frequencies))]
+
+    return Ez_matrices, Hy_matrices
+
+if not propagation_taper:
+        # Fixed spectral parameters
+        wvl_min = 1530 # nm
+        wvl_max = 1565 # nm
+        wvl_n = 1
+        frq_simulated = np.linspace(1000 / wvl_max, 1000 / wvl_min, wvl_n)
+
+        # Fixed simulation parameters for waveguide
+        wvg_width_start = 0.3
+        wvg_width_end = 1.5
+        taper_length = 30
+        wvg_strt_length = 20
+        wvg_neff = 3
+        cld_neff = 1.3
+
+        # Fixed simulation parameters for fiber
+        fiber_distance = 0.5
+        fiber_length = 20
+        fiber_core_width = 4.5
+        fiber_core_neff = 1.46
+        fiber_cld_neff = 1.44
+
+        # Fixed simulation parameters for simulation
+        sim_width = 5
+        sim_length = taper_length + 2*wvg_strt_length + fiber_distance + fiber_length
+        sim_resolution = 20
+        pml_thickness = 1
+
+        # Boundary condition
+        pml_layers = [mp.PML(pml_thickness)]
+
+        # Define the taper vertices
+        vertices = [mp.Vector3(0, -wvg_width_start/2),
+                    mp.Vector3(wvg_strt_length, -wvg_width_start/2),
+                    mp.Vector3(wvg_strt_length+taper_length, -wvg_width_end/2),
+                    mp.Vector3(2*wvg_strt_length+taper_length, -wvg_width_end/2),
+                    mp.Vector3(2*wvg_strt_length+taper_length, wvg_width_end/2),
+                    mp.Vector3(wvg_strt_length+taper_length, wvg_width_end/2),
+                    mp.Vector3(wvg_strt_length, wvg_width_start/2),
+                    mp.Vector3(0, wvg_width_start/2)]
+        
+        # Transform the vertices in a material grid
+        material_grid = SL.polygon_to_materialgrid(vertices=vertices,
+                                                   medium_outside=mp.Medium(epsilon=cld_neff**2),
+                                                   medium_inside=mp.Medium(epsilon=wvg_neff**2),
+                                                   y_axis = [-sim_width/2, sim_width/2])
+        
+        # Geometry definition
+        geometry = [mp.Block(size=mp.Vector3(sim_length-fiber_distance-fiber_length, sim_width, 0),
+                             center=mp.Vector3(-fiber_distance/2-fiber_length/2),
+                             material=material_grid),
+                   
+                    # Air
+                    mp.Block(size=mp.Vector3(fiber_length+fiber_distance, sim_width, 0),
+                             center=mp.Vector3(-sim_length/2+2*wvg_strt_length+taper_length+fiber_distance/2+fiber_length/2),
+                             material=mp.Medium(epsilon=1)),
+
+                    # Fiber
+                    mp.Block(size=mp.Vector3(fiber_length, sim_width, 0),
+                             center=mp.Vector3(-sim_length/2+2*wvg_strt_length+taper_length+fiber_distance+fiber_length/2),
+                             material=mp.Medium(epsilon=fiber_cld_neff**2)),
+                    mp.Block(size=mp.Vector3(fiber_length, fiber_core_width, 0),
+                            center=mp.Vector3(-sim_length/2+2*wvg_strt_length+taper_length+fiber_distance+fiber_length/2),
+                            material=mp.Medium(epsilon=fiber_core_neff**2))]
+        
+        # Compute the geometry boundary
+        cell_size, cell_center = SL.compute_geometry_bounds(geometry)
+
+        # Load mode fields & build sources (per frequency)
+        Ez1_fiber_array = []
+        Hy1_fiber_array = []
+        mode_sources = []
+
+        for frq in frq_simulated:
+                # Load the file for creating mode in input
+                with open(f"Output/Mode_ex_width{wvg_width_start}_frequency{frq:.3f}nm.json", "r") as f:
+                        data = json.load(f)
+                        
+                        # Extract the files
+                        Ez1_cross = np.array(data["Ez"])
+                        Hy1_cross = np.array(data["Hy"])
+                        mode_cross_axis = np.array(data['cross_axis'])
+
+                        # Create the source of the simulation
+                        source = SL.generate_modal_source(
+                                Ez_cross=Ez1_cross,
+                                Hy_cross=Hy1_cross,
+                                cross_axis=mode_cross_axis,
+                                src_position=mp.Vector3(-sim_length/2 + pml_thickness),
+                                src_size=mp.Vector3(0, sim_width),
+                                frequency=frq)
+
+                        mode_sources.append(source[0])
+                        mode_sources.append(source[1])
+
+                        Ez1_fiber_array.append(Ez1_cross)
+                        Hy1_fiber_array.append(Hy1_cross)
+                        fiber_cross_axis = np.array(data['cross_axis'])
+
+                """   
+                # Load the file to calculate fiber overlap
+                with open(f"Output/Mode_ex_fiber_frequency{frq:.3f}nm.json", "r") as f:
+                        data = json.load(f)
+                        
+                        # Extract the files
+                        Ez1_fiber = np.array(data["Ez"])
+                        Hy1_fiber = np.array(data["Hy"])
+                        Ez1_fiber_array.append(Ez1_fiber)
+                        Hy1_fiber_array.append(Hy1_fiber)
+                        fiber_cross_axis = np.array(data['cross_axis'])
+                """
+        # Fixed Simulation settings
+        sim = mp.Simulation(
+        cell_size=cell_size,
+        sources=mode_sources,
+        geometry=geometry,
+        resolution=sim_resolution,
+        boundary_layers=pml_layers)
+
+        moving_window_simulation(simulation=sim,
+                             window_spawn_time=wvg_neff,
+                             window_distance=wvg_neff,
+                             frequencies=frq_simulated,
+                             window_width=sim_width,
+                             max_time_window=6.23*wvg_neff,
+                             max_time_simulation=sim_width*wvg_neff*6)
+
+        # Times
+        #t_total = sim_length * wvg_neff * 2.0
+        t_total = 240
+
+        # Volumes
+        vol = mp.Volume(center=mp.Vector3(),
+                        size=mp.Vector3(sim_length, sim_width))
+        
+        # Insert a DFT and start simulation
+        dft = sim.add_dft_fields([mp.Ez, mp.Hy], frq_simulated, where=vol)
+        sim.run(until=t_total)
+
+        # Extract the electric and magnetic field
+        Ez_in_list = [sim.get_dft_array(dft, mp.Ez, i) for i in range(wvl_n)]
+        Hy_in_list = [sim.get_dft_array(dft, mp.Hy, i) for i in range(wvl_n)]
+
+        # Visualize the geometry simulated
+        eps_data = sim.get_array(center=mp.Vector3(0, 0, 0), 
+                                 size=cell_size, 
+                                 component=mp.Dielectric)
+
+        # Create figure with two subplots
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+
+        # LEFT SUBPLOT - Field Propagation Visualization
+        # Plot the material structure
+        ax1.imshow(eps_data.transpose(), interpolation='spline36', cmap='binary', aspect='auto',
+                   extent=(0, sim_length, 0, sim_width))
+        overlap_axis = np.linspace(0, sim_length, len(eps_data))
+
+        # Extract the fields at the DFT region and compute overlaps
+        for idx, frq in enumerate(frq_simulated):
+                ez_data = sim.get_dft_array(dft, mp.Ez, idx)
+                hy_data = sim.get_dft_array(dft, mp.Hy, idx)
+
+                # Overlay field on the left subplot (using transparency to show all)
+                ax1.imshow(np.abs(ez_data).transpose(), interpolation='spline36', 
+                                cmap='RdBu', alpha=1/(wvl_n+1), aspect='auto',
+                                extent=(0, sim_length, 0, sim_width))
+
+                # Create field axis for the cross section
+                field_axis = np.linspace(-sim_width/2, sim_width/2, len(ez_data[0]))
+
+                # Calculate overlap
+                overlap = SL.calculate_modal_overlap(Ez_cross = Ez1_fiber_array[idx], 
+                                                     Hy_cross = Hy1_fiber_array[idx], 
+                                                     Ez_field = ez_data, 
+                                                     Hy_field = hy_data,
+                                                     cross_axis = fiber_cross_axis,
+                                                     field_axis = field_axis)
+
+                # Add overlap to the plot
+                ax2.plot(overlap_axis, overlap, label=f"frq {frq:.3f} nm")
+
+        # Configure left subplot
+        plt_fontsize = 16
+        ax1.set_title('Field Propagation (Ez)', fontsize=plt_fontsize, fontweight='bold')
+        ax1.set_xlabel('Position [μm]', fontsize=plt_fontsize)
+        ax1.set_ylabel('Width [μm]', fontsize=plt_fontsize)
+        ax1.axis('off')
+
+        # Add scale bar or position markers
+        ax1.axvline(x=pml_thickness, color='white', linestyle='--', alpha=0.5, linewidth=1)
+        ax1.axvline(x=sim_length-pml_thickness, color='white', linestyle='--', alpha=0.5, linewidth=1)
+        ax1.text(x=-3*pml_thickness+sim_length, y=4, s='PML', color='white', fontsize=plt_fontsize, rotation=90)
+
+        # RIGHT SUBPLOT - Overlap
+        ax2.set_xlabel('Distance [μm]', fontsize=plt_fontsize)
+        ax2.set_ylabel('Modal Overlap', fontsize=plt_fontsize)
+        ax2.set_title('Modal Overlap vs Wavelength', fontsize=plt_fontsize, fontweight='bold')
+        ax2.tick_params(axis='x', labelsize=plt_fontsize)
+        ax2.tick_params(axis='y', labelsize=plt_fontsize)
+        ax2.grid(True, alpha=0.3)
+        ax2.legend()
 
         plt.show()
