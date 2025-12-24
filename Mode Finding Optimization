@@ -755,61 +755,6 @@ if not propagation_mmi:
 #################################################################
 ###  6 - Propagate light in a subresolution taper             ###
 #################################################################
-def moving_window_simulation(simulation,
-                             window_spawn_time,
-                             window_distance,
-                             frequencies,
-                             window_width,
-                             max_time_window,
-                             max_time_simulation):
-
-    t = 0.0
-    dft_arrays = []
-    t_spawn_arrays = []
-    n_dft = 0
-
-    # store per-frequency list of window-arrays
-    Ez_per_freq_windows = [[] for _ in frequencies]
-    Hy_per_freq_windows = [[] for _ in frequencies]
-
-    while t < max_time_simulation:
-        # 1) spawn new dft
-        vol = mp.Volume(center=mp.Vector3(window_distance * (n_dft + 1)),
-                        size=mp.Vector3(0, window_width))
-
-        dft = simulation.add_dft_fields([mp.Ez, mp.Hy], frequencies, where=vol)
-        dft_arrays.append(dft)
-        t_spawn_arrays.append(t)
-        n_dft += 1
-
-        # 2) advance time
-        simulation.run(until=window_spawn_time)
-        t += window_spawn_time
-
-        # 3) if the oldest window is old enough, finalize it (can be while, not if)
-        while dft_arrays and (t - t_spawn_arrays[0] >= max_time_window):
-            # read once (one array per frequency)
-            for i in range(len(frequencies)):
-                Ez_arr = simulation.get_dft_array(dft_arrays[0], mp.Ez, i)
-                Hy_arr = simulation.get_dft_array(dft_arrays[0], mp.Hy, i)  # <- FIX
-
-                Ez_per_freq_windows[i].append(Ez_arr)
-                Hy_per_freq_windows[i].append(Hy_arr)
-
-            # remove monitor + pop bookkeeping
-            simulation.dft_objects.pop(0)
-            dft_arrays.pop(0)
-            t_spawn_arrays.pop(0)  # <- FIX
-
-    # 4) build the final "matrix per frequency" by concatenating windows in order
-    # NOTE: axis=0 is typical; if your arrays are shaped differently, you may need axis=1.
-    Ez_matrices = [np.concatenate(Ez_per_freq_windows[i], axis=0) if Ez_per_freq_windows[i] else None
-                   for i in range(len(frequencies))]
-    Hy_matrices = [np.concatenate(Hy_per_freq_windows[i], axis=0) if Hy_per_freq_windows[i] else None
-                   for i in range(len(frequencies))]
-
-    return Ez_matrices, Hy_matrices
-
 if not propagation_taper:
         # Fixed spectral parameters
         wvl_min = 1530 # nm
@@ -929,87 +874,62 @@ if not propagation_taper:
         resolution=sim_resolution,
         boundary_layers=pml_layers)
 
-        moving_window_simulation(simulation=sim,
-                             window_spawn_time=wvg_neff,
-                             window_distance=wvg_neff,
-                             frequencies=frq_simulated,
-                             window_width=sim_width,
-                             max_time_window=6.23*wvg_neff,
-                             max_time_simulation=sim_width*wvg_neff*6)
-
-        # Times
-        #t_total = sim_length * wvg_neff * 2.0
-        t_total = 240
-
         # Volumes
-        vol = mp.Volume(center=mp.Vector3(),
-                        size=mp.Vector3(sim_length, sim_width))
+        n_dft = 30          # total monitors
+        N_active = 5        # max simultaneous monitors
+
+        dx = (sim_length - 2*pml_thickness) / n_dft
+        dt_step = sim_length * wvg_neff / n_dft
+        Ez_results = []
+        reference_phase = None
+        reference_position = None
+
+        for n in range(n_dft):
+                vol = mp.Volume(
+                        center=mp.Vector3(
+                        pml_thickness + (n + 0.5) * dx - sim_length / 2
+                        ),
+                        size=mp.Vector3(dx, sim_width, 0)
+                )
+                
+                dft = sim.add_dft_fields([mp.Ez], frq_simulated, where=vol)
+                print(f"Added DFT {n}, active monitors: {len(sim.dft_objects)}")
+                
+                sim.run(until=dt_step)
         
-        # Insert a DFT and start simulation
-        dft = sim.add_dft_fields([mp.Ez, mp.Hy], frq_simulated, where=vol)
-        sim.run(until=t_total)
+                if len(sim.dft_objects) > N_active:
+                        oldest = sim.dft_objects.pop(0)
+                        Ez = sim.get_dft_array(oldest, mp.Ez, 0)
+                        
+                        # Phase alignment using derivative approach
+                        if len(Ez_results) > 0:  # Not the first monitor
+                                prev_Ez = Ez_results[-1]
+                                
+                                # Calculate expected phase based on previous field's phase gradient
+                                center_idx = int(len(prev_Ez[-1]) / 2)
+                                prev_phase = np.angle(prev_Ez[-1,center_idx])  # Last few columns
+                                curr_phase = np.angle(Ez[0, center_idx])        # First few columns
+        
+                                phase_correction = curr_phase - prev_phase
+                
+                                # Apply correction
+                                Ez = Ez * np.exp(-1j * phase_correction)
+                
+                        Ez_results.append(Ez[1:])
 
-        # Extract the electric and magnetic field
-        Ez_in_list = [sim.get_dft_array(dft, mp.Ez, i) for i in range(wvl_n)]
-        Hy_in_list = [sim.get_dft_array(dft, mp.Hy, i) for i in range(wvl_n)]
+        Ez_array = np.vstack(Ez_results).T
 
-        # Visualize the geometry simulated
-        eps_data = sim.get_array(center=mp.Vector3(0, 0, 0), 
-                                 size=cell_size, 
-                                 component=mp.Dielectric)
-
-        # Create figure with two subplots
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
-
-        # LEFT SUBPLOT - Field Propagation Visualization
-        # Plot the material structure
-        ax1.imshow(eps_data.transpose(), interpolation='spline36', cmap='binary', aspect='auto',
-                   extent=(0, sim_length, 0, sim_width))
-        overlap_axis = np.linspace(0, sim_length, len(eps_data))
-
-        # Extract the fields at the DFT region and compute overlaps
-        for idx, frq in enumerate(frq_simulated):
-                ez_data = sim.get_dft_array(dft, mp.Ez, idx)
-                hy_data = sim.get_dft_array(dft, mp.Hy, idx)
-
-                # Overlay field on the left subplot (using transparency to show all)
-                ax1.imshow(np.abs(ez_data).transpose(), interpolation='spline36', 
-                                cmap='RdBu', alpha=1/(wvl_n+1), aspect='auto',
-                                extent=(0, sim_length, 0, sim_width))
-
-                # Create field axis for the cross section
-                field_axis = np.linspace(-sim_width/2, sim_width/2, len(ez_data[0]))
-
-                # Calculate overlap
-                overlap = SL.calculate_modal_overlap(Ez_cross = Ez1_fiber_array[idx], 
-                                                     Hy_cross = Hy1_fiber_array[idx], 
-                                                     Ez_field = ez_data, 
-                                                     Hy_field = hy_data,
-                                                     cross_axis = fiber_cross_axis,
-                                                     field_axis = field_axis)
-
-                # Add overlap to the plot
-                ax2.plot(overlap_axis, overlap, label=f"frq {frq:.3f} nm")
-
-        # Configure left subplot
-        plt_fontsize = 16
-        ax1.set_title('Field Propagation (Ez)', fontsize=plt_fontsize, fontweight='bold')
-        ax1.set_xlabel('Position [μm]', fontsize=plt_fontsize)
-        ax1.set_ylabel('Width [μm]', fontsize=plt_fontsize)
-        ax1.axis('off')
-
-        # Add scale bar or position markers
-        ax1.axvline(x=pml_thickness, color='white', linestyle='--', alpha=0.5, linewidth=1)
-        ax1.axvline(x=sim_length-pml_thickness, color='white', linestyle='--', alpha=0.5, linewidth=1)
-        ax1.text(x=-3*pml_thickness+sim_length, y=4, s='PML', color='white', fontsize=plt_fontsize, rotation=90)
-
-        # RIGHT SUBPLOT - Overlap
-        ax2.set_xlabel('Distance [μm]', fontsize=plt_fontsize)
-        ax2.set_ylabel('Modal Overlap', fontsize=plt_fontsize)
-        ax2.set_title('Modal Overlap vs Wavelength', fontsize=plt_fontsize, fontweight='bold')
-        ax2.tick_params(axis='x', labelsize=plt_fontsize)
-        ax2.tick_params(axis='y', labelsize=plt_fontsize)
-        ax2.grid(True, alpha=0.3)
-        ax2.legend()
-
+        plt.figure(figsize=(7, 4))
+        plt.imshow(
+        np.real(Ez_array),
+        aspect='auto',
+        cmap='RdBu',
+        interpolation='spline36',
+        extent=(0, sim_length, 0, sim_width)
+        )
+        plt.xlabel("Propagation direction (x)")
+        plt.ylabel("Transverse direction (y)")
+        plt.colorbar(label="|Ez|")
+        plt.title("Sliding‑window DFT field magnitude")
+        plt.tight_layout()
         plt.show()
