@@ -866,70 +866,98 @@ if not propagation_taper:
                         Hy1_fiber_array.append(Hy1_fiber)
                         fiber_cross_axis = np.array(data['cross_axis'])
                 """
-        # Fixed Simulation settings
-        sim = mp.Simulation(
-        cell_size=cell_size,
-        sources=mode_sources,
-        geometry=geometry,
-        resolution=sim_resolution,
-        boundary_layers=pml_layers)
+# Fixed Simulation settings
+sim = mp.Simulation(
+cell_size=cell_size,
+sources=mode_sources,
+geometry=geometry,
+resolution=sim_resolution,
+boundary_layers=pml_layers)
 
-        # Volumes
-        n_dft = 30          # total monitors
-        N_active = 5        # max simultaneous monitors
+# Volumes
+n_dft = 30          # total monitors
+N_active = 5        # max simultaneous monitors
+n_dft_active = 0    # Index of the active dft
 
-        dx = (sim_length - 2*pml_thickness) / n_dft
-        dt_step = sim_length * wvg_neff / n_dft
-        Ez_results = []
-        reference_phase = None
-        reference_position = None
+# Parameters for the simulation
+dx = (sim_length - 2*pml_thickness) / n_dft
+threshold_value = 0.05
+Ez_results = []
+Hy_results = []
+reference_phase = None
+reference_position = None
 
-        for n in range(n_dft):
+def stop_when_fields_above(component, point, threshold):
+    """Stop when field at ALL points are above threshold"""
+    def check(sim):
+        v = np.abs(sim.get_field_point(component, point))
+        return v > threshold
+    return check
+
+for n in range(n_dft + N_active - 1):
+        # If we have less than N_active dft window just spawn one
+        if len(sim.dft_objects) < N_active and n < n_dft:
                 vol = mp.Volume(
-                        center=mp.Vector3(
-                        pml_thickness + (n + 0.5) * dx - sim_length / 2
-                        ),
-                        size=mp.Vector3(dx, sim_width, 0)
-                )
+                        center=mp.Vector3(pml_thickness + (n + 0.5) * dx - sim_length / 2),
+                        size=mp.Vector3(dx, sim_width, 0))
                 
-                dft = sim.add_dft_fields([mp.Ez], frq_simulated, where=vol)
-                print(f"Added DFT {n}, active monitors: {len(sim.dft_objects)}")
-                
-                sim.run(until=dt_step)
-        
-                if len(sim.dft_objects) > N_active:
-                        oldest = sim.dft_objects.pop(0)
-                        Ez = sim.get_dft_array(oldest, mp.Ez, 0)
+                sim.add_dft_fields([mp.Ez, mp.Hy], frq_simulated, where=vol)  
+
+        # Otherwise we can also simulate and extract information
+        if n >= n_dft or len(sim.dft_objects) >= N_active:   
+                if n_dft_active < n_dft - 2:
+                        position_right = mp.Vector3(pml_thickness + (n_dft_active + wvg_neff) * dx - sim_length / 2)
+                        sim.run(until=stop_when_fields_above(mp.Ez, position_right, threshold_value))
+                else:
+                        sim.run(until=wvg_neff*dx)
+
+                n_dft_active += 1
+
+                # Take the first dft and extract electric field
+                Ez = sim.get_dft_array(sim.dft_objects[0], mp.Ez, 0)
+                Hy = sim.get_dft_array(sim.dft_objects[0], mp.Hy, 0)
+                sim.dft_objects.pop(0)
+
+                # Phase alignment using derivative approach
+                if len(Ez_results) > 0:  # Not the first monitor
+                        prev_Ez = Ez_results[-1]
                         
-                        # Phase alignment using derivative approach
-                        if len(Ez_results) > 0:  # Not the first monitor
-                                prev_Ez = Ez_results[-1]
-                                
-                                # Calculate expected phase based on previous field's phase gradient
-                                center_idx = int(len(prev_Ez[-1]) / 2)
-                                prev_phase = np.angle(prev_Ez[-1,center_idx])  # Last few columns
-                                curr_phase = np.angle(Ez[0, center_idx])        # First few columns
+                        # Calculate expected phase based on previous field's phase gradient
+                        center_idx = len(prev_Ez[-1]) // 2
+                        prev_phase = np.angle(prev_Ez[-1,center_idx])  # Last few columns
+                        curr_phase = np.angle(Ez[0, center_idx])        # First few columns
+
+                        phase_correction = curr_phase - prev_phase
         
-                                phase_correction = curr_phase - prev_phase
-                
-                                # Apply correction
-                                Ez = Ez * np.exp(-1j * phase_correction)
-                
-                        Ez_results.append(Ez[1:])
+                        # Apply correction
+                        Ez = Ez * np.exp(-1j * phase_correction)
+                        Hy = Hy * np.exp(-1j * phase_correction)
+        
+                Ez_results.append(Ez[1:])
+                Hy_results.append(Hy[1:])
 
-        Ez_array = np.vstack(Ez_results).T
+Ez_array = np.vstack(Ez_results)
+Hy_array = np.vstack(Hy_results)
+plt.figure(figsize=(7, 4))
+plt.imshow(
+np.abs(Ez_array).T,
+aspect='auto',
+cmap='RdBu',
+interpolation='spline36',
+extent=(pml_thickness, sim_length-pml_thickness, 0, sim_width))
+plt.xlabel("Propagation direction (x)")
+plt.ylabel("Transverse direction (y)")
+plt.colorbar(label="|Ez|")
+plt.title("Sliding‑window DFT field magnitude")
+plt.tight_layout()
+plt.show()
 
-        plt.figure(figsize=(7, 4))
-        plt.imshow(
-        np.real(Ez_array),
-        aspect='auto',
-        cmap='RdBu',
-        interpolation='spline36',
-        extent=(0, sim_length, 0, sim_width)
-        )
-        plt.xlabel("Propagation direction (x)")
-        plt.ylabel("Transverse direction (y)")
-        plt.colorbar(label="|Ez|")
-        plt.title("Sliding‑window DFT field magnitude")
-        plt.tight_layout()
-        plt.show()
+field_axis = np.linspace(-sim_width/2, sim_width/2, sim_width * sim_resolution)
+# Calculate the overlap at the input
+overlap_in = SL.calculate_modal_overlap(
+        Ez_cross=Ez1_fiber_array[0],
+        Hy_cross=Hy1_fiber_array[0],
+        Ez_field=Ez_array,
+        Hy_field=Hy_array,
+        cross_axis=fiber_cross_axis,
+        field_axis=field_axis)
