@@ -493,3 +493,178 @@ def calculate_modal_overlap(Ez_cross, Hy_cross, Ez_field, Hy_field, cross_axis=N
     overlap_norm = abs(overlap / mode_norm / field_norm)**2
 
     return overlap_norm, field_norm
+
+def stop_when_field_exceeds(component, point, threshold):
+    """
+    Creates a termination condition for Meep to stop the simulation when 
+    the field amplitude at a specific location exceeds a given threshold.
+
+    This function returns a callable (closure) that Meep executes at every 
+    time step. It is intended to be passed to the 'until' argument of 
+    simulation.run().
+
+    Parameters
+    ----------
+    component : mp.Component
+        The field component to monitor (e.g., mp.Ez, mp.Hy).
+    point : mp.Vector3
+        The specific spatial coordinate to check.
+    threshold : float
+        The absolute magnitude value. The simulation stops when |field| > threshold.
+
+    Returns
+    -------
+    Callable[[mp.Simulation], bool]
+        A function that returns True (stop) or False (continue) based on the field value.
+    """
+    def check_condition(sim):
+        # Extract the complex field value at the specific point
+        field_value = sim.get_field_point(component, point)
+        
+        # Calculate the magnitude (absolute value)
+        magnitude = np.abs(field_value)
+        
+        # Return True to stop simulation if threshold is breached
+        return magnitude > threshold
+
+    return check_condition
+
+def simulate_without_reflections(simulation, number_windows, max_active_windows, window_volume, frequencies):
+        """
+        Propagate an electromagnetic pulse using a "sliding window" FDTD technique to 
+        capture frequency-domain fields while minimizing memory usage and reflections.
+
+        This method tracks the pulse as it moves through the geometry, activating and 
+        deactivating Fourier Transform (DFT) monitors dynamically. This allows for the 
+        simulation of long waveguides or large domains where capturing the global field 
+        simultaneously would be computationally prohibitive or memory-intensive.
+
+        Parameters
+        ----------
+        simulation : meep.Simulation
+                The initialized Meep simulation object containing geometry, sources, and 
+                boundary conditions.
+        number_windows : int
+                The total number of spatial windows (chunks) to record along the propagation direction.
+        max_active_windows : int
+                The size of the sliding buffer. Determines how many DFT monitors are active 
+                simultaneously. Must be at least 3 to allow for robust overlap and triggering.
+        window_volume : meep.Volume
+                The volume of a single recording window. The code assumes these windows are 
+                stacked sequentially along the x-axis.
+        frequencies : list of float
+                The list of frequencies to capture in the DFT monitors.
+
+        Returns
+        -------
+        ez_dict : dict of ndarray
+                Dictionary mapping each frequency to the stitched Electric field (Ez) matrix.
+                The shape represents the full concatenated domain.
+        hy_dict : dict of ndarray
+                Dictionary mapping each frequency to the stitched Magnetic field (Hy) matrix.
+
+        Notes
+        -----
+        - **Calibration:** The function performs a pre-run (resetting afterwards) to determine 
+        the peak field amplitude. This is used to set a dynamic threshold for the 
+        propagation trigger.
+        - **Phase Stitching:** Since DFT windows are initialized at different simulation 
+        times, their raw phases are not aligned. This function attempts to correct the 
+        phase empirically by comparing the overlapping pixels of adjacent windows.
+        - **Triggering:** The simulation advances based on a field-threshold trigger 
+        (`stop_when_fields_above`) to detect when the pulse reaches the next window.
+
+        """
+        # Method works if there are at least 3 max_active windows
+        if max_active_windows < 3:
+                raise ValueError("Not enough active windows for the method (minimum 3 required).")
+        
+        # We run a short simulation to estimate the maximum source amplitude. 
+        calibration_vol = mp.Volume(center=mp.Vector3(),
+                                   size=mp.Vector3(window_volume.size.x * number_windows, window_volume.size.y))  
+        simulation.run(until=30)         
+        
+        # Measure peak field to set a dynamic trigger threshold later
+        temp_field = simulation.get_array(component=mp.Ez, vol=calibration_vol)
+        max_field_amp = np.max(np.abs(temp_field))
+        
+        # Completely reset Meep state to start the real simulation
+        simulation.reset_meep()
+
+        # Initialization
+        window_active_idx = 0
+        extra_index_distance = int(max_active_windows / 2) + 1
+        simulation_time = 0
+
+        # Initialize storage dictionaries
+        ez_dict = {f: [] for f in frequencies}
+        hy_dict = {f: [] for f in frequencies}
+
+        # Iterate enough times to cover all windows plus the buffer fade-out
+        total_cycles = number_windows + max_active_windows - 1  
+        for sim_idx in range(total_cycles):
+                
+                # Add New DFT Monitor (if we haven't reached the end of the geometry)
+                if len(simulation.dft_objects) < max_active_windows and sim_idx < number_windows:
+                        # Calculate the center position of the new window 
+                        active_center = window_volume.center + mp.Vector3((window_volume.size.x) * (sim_idx + 0.5))
+                        active_volume = mp.Volume(center=active_center, size=window_volume.size)
+                        
+                        # Create the monitor (fields are accumulated starting from NOW)
+                        simulation.add_dft_fields([mp.Ez, mp.Hy], frequencies, where=active_volume) 
+                
+                # Propagate Pulse
+                # Only start running when the buffer is full or we've created all necessary windows
+                if sim_idx >= number_windows or len(simulation.dft_objects) >= max_active_windows:   
+                
+                        # Logic 1: Pulse is still traveling through the main domain
+                        if window_active_idx < number_windows - extra_index_distance:
+                                # Specific point ahead of the current window to check for signal arrival
+                                trigger_pos = window_volume.center + mp.Vector3((window_volume.size.x) * (window_active_idx + extra_index_distance))
+                                
+                                # Run until the field at trigger_pos exceeds 10% of the calibrated max
+                                simulation.run(until=stop_when_field_exceeds(mp.Ez, trigger_pos, max_field_amp * 0.1))
+                                simulation_time = simulation.meep_time()
+                        
+                        # Logic 2: Pulse is exiting the domain (extrapolation)
+                        else:
+                                remaining_steps = number_windows - max_active_windows
+                                simulation.run(until=simulation_time / remaining_steps)
+
+                        # We always process the oldest active window (index 0)
+                        dft_obj = simulation.dft_objects[0]
+
+                        for idf, frequency in enumerate(frequencies):
+                                Ez = simulation.get_dft_array(dft_obj, mp.Ez, idf)
+                                Hy = simulation.get_dft_array(dft_obj, mp.Hy, idf)
+
+                                # Because DFT monitors started at different times, their phases are offset.
+                                # We align them by matching the phase of the overlapping pixels.
+                                if window_active_idx > 0:  
+                                        prev_Ez = ez_dict[frequency][-1]
+                                        
+                                        # We pick the center_idx of the Y-axis to avoid edge noise.
+                                        center_idx = len(prev_Ez[-1]) // 2
+                                        
+                                        prev_phase = np.angle(prev_Ez[-1, center_idx]) 
+                                        curr_phase = np.angle(Ez[0, center_idx])       
+                                        phase_correction = curr_phase - prev_phase
+                        
+                                        # Apply correction to the whole window
+                                        Ez = Ez * np.exp(-1j * phase_correction)
+                                        Hy = Hy * np.exp(-1j * phase_correction)
+
+                                # Remove the first row of pixels to avoid duplicating the stitching boundary
+                                ez_dict[frequency].append(Ez[1:])
+                                hy_dict[frequency].append(Hy[1:])
+
+                        # Remove the oldest monitor to free up the slot
+                        simulation.dft_objects.pop(0)
+                        window_active_idx += 1
+
+        # Stack the list of arrays into a single continuous matrix for each frequency
+        for frequency in frequencies:
+                ez_dict[frequency] = np.vstack(ez_dict[frequency])
+                hy_dict[frequency] = np.vstack(hy_dict[frequency])
+        
+        return ez_dict, hy_dict
