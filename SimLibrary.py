@@ -424,13 +424,14 @@ def calculate_modal_overlap(Ez_cross, Hy_cross, Ez_field, Hy_field, cross_axis=N
     field_axis : array like
         coordinates where Ez_field and Hy_field are defined.
         If None, assumes same as cross_axis.
+    field_norm : value
+        numerical value used to normalized the Ez field.
+        If None, the Ez field is used to determine the normalization
 
     Returns
     -------
     float or ndarray
-        The normalized modal overlap value(s). If Ez_field and Hy_field contain 
-        multiple slices along one axis (e.g., different z-planes), the function 
-        returns an array of overlap values, one per slice.
+        The normalized modal overlap value(s) between Ez_cross and Hy_cross.
 
     Notes
     -----
@@ -443,7 +444,7 @@ def calculate_modal_overlap(Ez_cross, Hy_cross, Ez_field, Hy_field, cross_axis=N
 
           ∫ (Ez_cross * Hy_cross*) dx
 
-    - The field normalization is evaluated as:
+    - The field normalization (if field_norm is not None) is evaluated as:
 
           ∫ (Ez_field * Hy_field*) dx
 
