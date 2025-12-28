@@ -402,7 +402,7 @@ def generate_modal_source(Ez_cross, Hy_cross, cross_axis, src_position, src_size
 
     return source
 
-def calculate_modal_overlap(Ez_cross, Hy_cross, Ez_field, Hy_field, cross_axis=None, field_axis=None):
+def calculate_modal_overlap(Ez_cross, Hy_cross, Ez_field, Hy_field, cross_axis=None, field_axis=None, field_norm=None):
     """
     Compute the normalized modal overlap between a guided-mode cross section and 
     the electromagnetic fields obtained from a simulation.
@@ -480,12 +480,15 @@ def calculate_modal_overlap(Ez_cross, Hy_cross, Ez_field, Hy_field, cross_axis=N
     overlap = 0.5 * np.sum(Ez_cross * np.conj(Hy_field) + Hy_cross * np.conj(Ez_field), axis=1)
 
     # Calculate the normalization factor the the mode
-    mode_norm = np.sqrt(np.abs(np.sum((Ez_cross * np.conj(Hy_cross)))))
+    mode_norm = np.sqrt(np.abs(0.5 * np.real(np.sum((Ez_cross * np.conj(Hy_cross) + Hy_cross * np.conj(Ez_cross))))))
 
     # Calculate the normalization factor for the fields, based on the maximum Ez field position
-    field_norm = np.sqrt(np.abs(np.sum(Ez_field * np.conj(Hy_field), axis=1)))
+    if field_norm is None:
+        x_max_index = np.argmax(np.abs(0.5 * np.real(np.sum(Ez_field * np.conj(Hy_field) + Hy_field * np.conj(Ez_field), axis=1))))
+        field_norm = np.sqrt(np.abs(0.5 * np.real(np.sum(Ez_field[x_max_index] * np.conj(Hy_field[x_max_index]) + 
+                                                        Hy_field[x_max_index] * np.conj(Ez_field[x_max_index])))))
 
     # Normalize the overlap
     overlap_norm = abs(overlap / mode_norm / field_norm)**2
 
-    return overlap_norm
+    return overlap_norm, field_norm
