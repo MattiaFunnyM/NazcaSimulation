@@ -805,7 +805,7 @@ if not propagation_taper:
         # Fixed simulation parameters for simulation
         sim_width = 10
         sim_length = taper_length + 2*wvg_strt_length + fiber_distance + fiber_length
-        sim_resolution = 20
+        sim_resolution = 30
         pml_thickness = 1
 
         # Parameters for the no-reflection simulation
@@ -868,7 +868,11 @@ if not propagation_taper:
                         Ez1_cross = np.array(data["Ez"])
                         Hy1_cross = np.array(data["Hy"])
                         mode_cross_axis = np.array(data['cross_axis'])
-
+                        neff = data['neff']
+                        o = SL.calculate_modal_overlap(Ez1_cross,
+                                                   Hy1_cross,
+                                                   [Ez1_cross],
+                                                   [Hy1_cross])
                         # Create the source of the simulation
                         source = SL.generate_modal_source(
                                 Ez_cross=Ez1_cross,
@@ -904,7 +908,7 @@ if not propagation_taper:
         dft = sim.add_dft_fields([mp.Ez, mp.Hy], frq_simulated, 
                                         where=mp.Volume(center=mp.Vector3(),
                                         size=cell_size))
-        sim.run(until=sim_length*wvg_neff*2)
+        sim.run(until=sim_length*wvg_neff)
 
         # Extract electric and magnetic field
         Ez_array_prev = {}
@@ -976,12 +980,12 @@ if not propagation_taper:
 
                 # X-axis covers the whole simulation length (0 to L)
                 prop_axis_std = np.linspace(0, sim_length, len(overlap))
-                ax_std_overlap.plot(prop_axis_std, overlap, label=f"Freq: {frq:.2f}")
+                ax_std_overlap.plot(prop_axis_std, overlap, label=f"Freq: {frq:.3f}")
 
         ax_std_overlap.set_title("Standard: Modal Overlap")
         ax_std_overlap.set_xlabel("Propagation distance (x)")
         ax_std_overlap.set_ylabel("Normalized Overlap")
-        ax_std_overlap.grid(True, alpha=0.3)
+        ax_std_overlap.grid(True)
         ax_std_overlap.legend()
 
         # Field Map
@@ -996,7 +1000,7 @@ if not propagation_taper:
                 # Note: Extent is (pml_thickness, sim_length-pml_thickness) because
                 # the sliding window function typically calculates the inner region
                 im_slide = ax_slide_field.imshow(np.abs(Ez_array[frequency]).T,
-                                                aspect='auto', cmap='RdBu', interpolation='spline36', alpha=0.9,
+                                                aspect='auto', cmap='RdBu', interpolation='spline36', alpha=0.7,
                                                 extent=(pml_thickness, sim_length-pml_thickness, 0, sim_width))
 
         ax_slide_field.set_title("No-Reflection (Sliding): |Ez|")
@@ -1016,15 +1020,15 @@ if not propagation_taper:
                         Hy_field=Hy_array[frq],
                         cross_axis=fiber_cross_axis,
                         field_axis=field_axis_y)
-
+        
                 # X-axis covers only the stitched region (PML to L-PML)
                 prop_axis_slide = np.linspace(pml_thickness, sim_length-pml_thickness, len(overlap))
-                ax_slide_overlap.plot(prop_axis_slide, overlap, label=f"Freq: {frq:.2f}")
+                ax_slide_overlap.plot(prop_axis_slide, overlap, label=f"Freq: {frq:.3f}")
 
         ax_slide_overlap.set_title("No-Reflection: Modal Overlap")
         ax_slide_overlap.set_xlabel("Propagation distance (x)")
         ax_slide_overlap.set_ylabel("Normalized Overlap")
-        ax_slide_overlap.grid(True, alpha=0.3)
+        ax_slide_overlap.grid(True)
         ax_slide_overlap.legend()
 
         plt.show()
