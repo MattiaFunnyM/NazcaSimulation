@@ -622,7 +622,7 @@ def simulate_without_reflections(simulation, number_windows, max_active_windows,
                                 # Specific point ahead of the current window to check for signal arrival
                                 trigger_pos = window_volume.center + mp.Vector3((window_volume.size.x) * (window_active_idx + extra_index_distance))
                                 
-                                # Run until the field at trigger_pos exceeds 10% of the calibrated max
+                                # Run until the field at trigger_pos exceeds 5% of the calibrated max
                                 simulation.run(until=stop_when_field_exceeds(mp.Ez, trigger_pos, max_field_amp * 0.05))
                                 simulation_time = simulation.meep_time()
                         
