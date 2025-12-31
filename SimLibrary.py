@@ -188,6 +188,77 @@ def compute_geometry_bounds(geometry_list):
 
     return bounding_size, bounding_center
 
+def normalizing_mode_field(Ez, Hy, dx, eps_cross):
+    """
+    Normalize electromagnetic field components and calculate effective refractive index.
+
+    This function extracts a cross-sectional slice of the electromagnetic field at the
+    location of maximum electric field intensity, computes the optical power flow, and
+    normalizes the field components accordingly. It also calculates the effective 
+    refractive index of the mode based on the permittivity distribution.
+
+    Parameters
+    ----------
+    Ez : ndarray
+        2D complex array representing the z-component of the electric field.
+    Hy : ndarray
+        2D complex array representing the y-component of the magnetic field.
+    dx : float
+        Spatial step size for numerical integration.
+    eps_cross : ndarray
+        1D array of permittivity values along the cross-section.
+
+    Returns
+    -------
+    Ez_cross_norm : ndarray
+        Normalized real part of the electric field along the cross-section.
+    Hy_cross_norm : ndarray
+        Normalized real part of the magnetic field along the cross-section.
+    neff : float
+        Effective refractive index of the mode.
+
+    Notes
+    -----
+    The normalization ensures unit power flow through the cross-section. The function
+    applies a correction factor to account for the difference between real and absolute
+    values of the complex fields, ensuring physically meaningful normalization.
+    """
+
+    # Locate the position of maximum electric field intensity
+    flat_index = np.argmax(np.real(Ez))
+    x_max_index, _ = np.unravel_index(flat_index, Ez.shape)
+  
+    # Extract cross-sectional field profiles at the maximum intensity location
+    Ez_cross = Ez[x_max_index, :]
+    Hy_cross = Hy[x_max_index, :]
+
+    # Compute the time-averaged Poynting vector (optical power density)
+    # Factor of -0.5 accounts for time-averaging and direction convention
+    power_density = -0.5 * np.real(Ez_cross * np.conj(Hy_cross))
+
+    # Integrate power density to obtain total power flow through cross-section
+    total_power = np.abs(np.sum(power_density) * dx)
+
+    # Normalize field components by square root of power for unit power flow
+    # Note: Real parts are used initially for computational convenience
+    Ez_cross_norm = np.real(Ez_cross) / np.sqrt(total_power)
+    Hy_cross_norm = np.real(Hy_cross) / np.sqrt(total_power) 
+
+    # Apply correction factor to account for complex field magnitude
+    # This ensures the normalized fields reflect the true field amplitudes
+    amplitude_correction = np.max(np.abs(Ez_cross)) / np.max(np.real(Ez_cross))
+
+    Ez_cross_norm *= amplitude_correction
+    Hy_cross_norm *= amplitude_correction
+
+    # Calculate effective permittivity distribution weighted by power density
+    eps_eff_cross = power_density * eps_cross / total_power
+ 
+    # Compute effective refractive index from integrated effective permittivity
+    neff = np.sqrt(np.sum(eps_eff_cross) * dx)
+
+    return Ez_cross_norm, Hy_cross_norm, neff
+
 def finding_mode_from_geometry(geometry, mode=1, frequency=1, resolution=20, time=50):
     """
     Compute the TE mode fields for a given geometry in a Meep simulation.
@@ -227,7 +298,6 @@ def finding_mode_from_geometry(geometry, mode=1, frequency=1, resolution=20, tim
     - Fields are normalized to the total optical power of the mode.
     - The effective index is computed from the normalized field and material distribution.
     """
-
     
     # Simulation boundary from geometry
     sim_size, sim_center = compute_geometry_bounds(geometry)
@@ -271,47 +341,19 @@ def finding_mode_from_geometry(geometry, mode=1, frequency=1, resolution=20, tim
     # Extract complex field component
     Ez1 = sim.get_dft_array(dft, mp.Ez, 0)
     Hy1 = sim.get_dft_array(dft, mp.Hy, 0)
-
-    # Extract the cross section at that maxima (used for cross section and mode generation
-    flat_index = np.argmax(np.real(Ez1))
-    x_max_index, _ = np.unravel_index(flat_index, Ez1.shape)
-    Ez1_cross = Ez1[x_max_index, :]
-    Hy1_cross = Hy1[x_max_index, :]
+     
+    # Calculate the positional variation needed for normalization
+    dx = sim_size.y / resolution  
     
-    # Calculate the normalization from the fields optical power
-    dy = sim_size.y / resolution  
-
-    # Calculate the optical power as half of the product of electric field and magnetic field
-    Power_vector = -0.5 * np.real(Ez1_cross * np.conj(Hy1_cross))
-
-    # The power value of the cross section is the integral of the optical power vector
-    Power_value = np.abs(np.sum(Power_vector) * dy)
-    
-    # To normalize the fields, we need to divide by the square root of the power.
-    # In reality, np.abs(Ez1_cross) is normalized, not np.real(Ez1_cross) that oscillates
-    # Byt later Ez1 and Hy1 are properly normalized
-    Ez1_cross_norm = np.real(Ez1_cross) / np.sqrt(Power_value)
-    Hy1_cross_norm = np.real(Hy1_cross) / np.sqrt(Power_value) 
-
-    # Normalization by ratio to pass from np.real to np.abs
-    Ez1_cross_norm *= np.max(np.abs(Ez1_cross)) / np.max(np.real(Ez1_cross))
-    Hy1_cross_norm *= np.max(np.abs(Ez1_cross)) / np.max(np.real(Ez1_cross))
-    
-    # Get the material profile distribtuion
+    # Extract the information about the material
     eps_data = sim.get_array(
-    component=mp.Dielectric,
-    center=mp.Vector3(),           
-    size=sim_size)
-
-    # Get the cross section of the material profile
-    eps_cross = eps_data[x_max_index, :]
-
-    # Calculate refractive index
-    eps_eff_cross = Power_vector * eps_cross / Power_value
-    neff = np.sqrt(np.sum(eps_eff_cross) * dy)
-                   
-    # Return the field cross section 
-    return Ez1_cross_norm, Hy1_cross_norm, neff
+        component=mp.Dielectric,
+        center=mp.Vector3(),           
+        size=sim_size)
+    eps_cross = eps_data[0, :]
+    
+    # Return the normalize mode field cross section 
+    return normalizing_mode_field(Ez=Ez1, Hy=Hy1, dx=dx, eps_cross=eps_cross)
 
 def generate_modal_source(Ez_cross, Hy_cross, cross_axis, src_position, src_size, src_decay=3, frequency=1):
     """
