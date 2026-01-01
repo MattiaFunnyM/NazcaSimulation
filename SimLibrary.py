@@ -188,7 +188,7 @@ def compute_geometry_bounds(geometry_list):
 
     return bounding_size, bounding_center
 
-def normalizing_mode_field(Ez, Hy, dx, eps_cross):
+def normalizing_mode_field(Ez, Hy, delta, eps_cross):
     """
     Normalize electromagnetic field components and calculate effective refractive index.
 
@@ -203,7 +203,7 @@ def normalizing_mode_field(Ez, Hy, dx, eps_cross):
         2D complex array representing the z-component of the electric field.
     Hy : ndarray
         2D complex array representing the y-component of the magnetic field.
-    dx : float
+    delta : float
         Spatial step size for numerical integration.
     eps_cross : ndarray
         1D array of permittivity values along the cross-section.
@@ -237,7 +237,7 @@ def normalizing_mode_field(Ez, Hy, dx, eps_cross):
     power_density = -0.5 * np.real(Ez_cross * np.conj(Hy_cross))
 
     # Integrate power density to obtain total power flow through cross-section
-    total_power = np.abs(np.sum(power_density) * dx)
+    total_power = np.abs(np.sum(power_density) * delta)
 
     # Normalize field components by square root of power for unit power flow
     # Note: Real parts are used initially for computational convenience
@@ -255,11 +255,11 @@ def normalizing_mode_field(Ez, Hy, dx, eps_cross):
     eps_eff_cross = power_density * eps_cross / total_power
  
     # Compute effective refractive index from integrated effective permittivity
-    neff = np.sqrt(np.sum(eps_eff_cross) * dx)
+    neff = np.sqrt(np.sum(eps_eff_cross) * delta)
 
     return Ez_cross_norm, Hy_cross_norm, neff
 
-def finding_mode_from_geometry(geometry, mode=1, frequency=1, resolution=20, time=50):
+def finding_mode_from_geometry(geometry, mode=1, frequency=1, resolution=20, time=50, eps_cross=None):
     """
     Compute the TE mode fields for a given geometry in a Meep simulation.
 
@@ -280,6 +280,9 @@ def finding_mode_from_geometry(geometry, mode=1, frequency=1, resolution=20, tim
         Spatial resolution of the simulation (default is 20).
     time : float, optional
         Total simulation time (in Meep time units) (default is 50).
+    eps_cross : ndarray
+        1D array of permittivity values along the cross-section.
+        If None, uses the one from simulation
 
     Returns
     -------
@@ -343,17 +346,18 @@ def finding_mode_from_geometry(geometry, mode=1, frequency=1, resolution=20, tim
     Hy1 = sim.get_dft_array(dft, mp.Hy, 0)
      
     # Calculate the positional variation needed for normalization
-    dx = sim_size.y / resolution  
+    delta = sim_size.y / resolution  
     
     # Extract the information about the material
-    eps_data = sim.get_array(
-        component=mp.Dielectric,
-        center=mp.Vector3(),           
-        size=sim_size)
-    eps_cross = eps_data[0, :]
+    if eps_cross is None:
+        eps_data = sim.get_array(
+            component=mp.Dielectric,
+            center=mp.Vector3(),           
+            size=sim_size)
+        eps_cross = eps_data[int(len(eps_data)/2), :]
     
     # Return the normalize mode field cross section 
-    return normalizing_mode_field(Ez=Ez1, Hy=Hy1, dx=dx, eps_cross=eps_cross)
+    return normalizing_mode_field(Ez=Ez1, Hy=Hy1, delta=delta, eps_cross=eps_cross)
 
 def generate_modal_source(Ez_cross, Hy_cross, cross_axis, src_position, src_size, src_decay=3, frequency=1):
     """
