@@ -138,8 +138,8 @@ if not mode_calculated:
                 # Save individual file
                 file_name_wvg = f"Output/Mode_ex_width{wvg_width}_frequency{frq:.3f}nm.json"
                 file_name_fiber = f"Output/Mode_ex_fiber_frequency{frq:.3f}nm.json"
-                with open(file_name_wvg if mode_calculated_kind == 'wvg' else file_name_fiber, "w") as f:
-                        json.dump(data, f)
+                #with open(file_name_wvg if mode_calculated_kind == 'wvg' else file_name_fiber, "w") as f:
+                #        json.dump(data, f)
 
                 # Configure plot with larger fonts
                 plt_fontsize = 16
@@ -1042,7 +1042,7 @@ if not propagation_curve:
         frq = 1000 / wvl
 
         # Geometry parameters
-        sim_resolution = 20
+        sim_resolution = 25
         sim_sub_pixel = 10
         sim_circle_count = 200
         ext_width = 3
@@ -1053,7 +1053,7 @@ if not propagation_curve:
         sim_length = ext_width * 2
 
         # Define different waveguide radii to test
-        wvg_radii = [14, 13]  # um
+        wvg_radii = [30, 13, 11]  # um
 
         # Create figure with two subplots side by side
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 7))
@@ -1101,11 +1101,6 @@ if not propagation_curve:
                 sources = [
                 mp.Source(
                         mp.GaussianSource(frequency=frq, fwidth=frq/2), 
-                        component=mp.Hx, 
-                        center=mp.Vector3(wvg_radius, 0),
-                        size=mp.Vector3(wvg_width)),
-                mp.Source(
-                        mp.GaussianSource(frequency=frq, fwidth=frq/2), 
                         component=mp.Ez, 
                         center=mp.Vector3(wvg_radius, 0),
                         size=mp.Vector3(wvg_width))
@@ -1126,12 +1121,14 @@ if not propagation_curve:
                 dft_volume = mp.Volume(
                 center=mp.Vector3(-wvg_radius-1/sim_resolution),
                 size=mp.Vector3(ext_width * 2, cell_size.y))
+                
+                # Run simulation for sufficient time for wave to propagate
+                sim.run(until=wvg_radius * 2 * np.pi * wvg_neff)
 
-                sim.run(until=wvg_radius * 3 * np.pi * wvg_neff)
                 dft = sim.add_dft_fields([mp.Ez, mp.Hx], [frq], where=dft_volume)
 
                 # Run simulation for sufficient time for wave to propagate
-                sim.run(until=wvg_radius * np.pi * wvg_neff)
+                sim.run(until=wvg_radius * 2 * np.pi * wvg_neff)
                 
                 # Extract permittivity distribution over full simulation domain
                 eps_data = sim.get_array(
@@ -1155,8 +1152,7 @@ if not propagation_curve:
                 Hx_profile *= -np.exp(-1j*(angle+np.pi/2))
                 
                 # Extract corresponding permittivity profile
-                x_index = int((dft_volume.center.x + dft_volume.size.x / 2 + cell_size.x / 2) * sim_resolution)
-                eps_cross = eps_data[:x_index+2, y_center_index]
+                eps_cross = eps_data[:len(Ez_profile), y_center_index]
   
                 # Spatial discretization step
                 delta = dft_volume.size.x / sim_resolution
