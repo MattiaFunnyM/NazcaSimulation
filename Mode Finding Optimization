@@ -96,7 +96,7 @@ if not mode_calculated:
         cld_neff = 1.3 if mode_calculated_kind == 'wvg' else 1.44
 
         # Define fixed waveguide width
-        wvg_width = 0.3 if mode_calculated_kind == 'wvg' else 4.5
+        wvg_width = 0.25 if mode_calculated_kind == 'wvg' else 4.5
 
         # Create single figure
         fig, ax = plt.subplots(1, 1, figsize=(12, 8))
@@ -174,7 +174,7 @@ if not propagation_waveguide:
         cld_neff = 1.3
 
         # Define fixed waveguide width
-        wvg_width = 0.3 
+        wvg_width = 0.25
 
         # Create the geometry
         geometry = [
@@ -317,7 +317,7 @@ if not propagation_coupler:
         cld_neff = 1.3
 
         # Define fixed waveguide width
-        wvg_width = 0.3 
+        wvg_width = 0.25
         coupler_gap = 0.3
 
         # Create the geometry
@@ -467,7 +467,7 @@ if not propagation_mmi:
         wvg_neff = 3
         cld_neff = 1.3
         mmi_width = 3
-        wvg_width = 0.3
+        wvg_width = 0.25
         wvg_input_mmi_width = 0.8
         mmi_output_shift = mmi_width / 4
 
@@ -788,7 +788,7 @@ if not propagation_taper:
         frq_simulated = np.linspace(1000 / wvl_max, 1000 / wvl_min, wvl_n)
 
         # Fixed simulation parameters for waveguide
-        wvg_width_start = 0.3
+        wvg_width_start = 0.25
         wvg_width_end = 1.5
         taper_length = 30
         wvg_strt_length = 20
@@ -1033,7 +1033,6 @@ if not propagation_taper:
 
         plt.show()
 
-        
 #################################################################
 ###  7 - Propagate bend waveguide and calculate overlap       ###
 #################################################################
@@ -1041,47 +1040,49 @@ if not propagation_curve:
         # Wavelength and frequency parameters
         wvl = 1550  # nm
         frq = 1000 / wvl
-        
+
         # Geometry parameters
         sim_resolution = 20
-        n_circle_vertex = 50
-        bnd_width = 3
-        sub_pixel = 20
-        wvg_width = 0.3
-        wvg_neff = 3
+        sim_sub_pixel = 10
+        sim_circle_count = 200
+        ext_width = 3
+        wvg_width = 0.25
+        wvg_neff = 2
         cld_neff = 1.3
-        sim_width = bnd_width * 2 + wvg_width 
-        sim_length = bnd_width * 2
-        
+        sim_width = ext_width * 2 
+        sim_length = ext_width * 2
+
         # Define different waveguide radii to test
-        wvg_radii = [5]  # um
+        wvg_radii = [14, 13]  # um
 
         # Create figure with two subplots side by side
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 7))
 
         for wvg_radius in wvg_radii:
+
+                ### FIRST METHOD ###
                 # Define the vertices of the annular (ring) waveguide
                 vertices = []
                 radius_out = wvg_radius + wvg_width / 2
                 radius_in = wvg_radius - wvg_width / 2
                 
                 # Outer circle vertices (counterclockwise)
-                for idp in range(n_circle_vertex + 1):
-                        angle = idp / n_circle_vertex * 2 * np.pi
+                for idp in range(sim_circle_count + 1):
+                        angle = idp / sim_circle_count * 2 * np.pi
                         vertices.append(mp.Vector3(radius_out * np.cos(angle), 
                                                 radius_out * np.sin(angle)))
                 
                 # Inner circle vertices (clockwise to close the polygon)
-                for idp in range(n_circle_vertex, -1, -1):
-                        angle = idp / n_circle_vertex * 2 * np.pi
+                for idp in range(sim_circle_count, -1, -1):
+                        angle = idp / sim_circle_count * 2 * np.pi
                         vertices.append(mp.Vector3(radius_in * np.cos(angle), 
                                                 radius_in * np.sin(angle)))
                 
                 # Transform the vertices into a material grid
-                semi_axis = wvg_radius + bnd_width
+                semi_axis = wvg_radius + ext_width
                 material_grid = SL.polygon_to_materialgrid(
                 vertices=vertices,
-                sub_resolution=sub_pixel,
+                sub_resolution=sim_length,
                 medium_outside=mp.Medium(epsilon=cld_neff**2),
                 medium_inside=mp.Medium(epsilon=wvg_neff**2),
                 x_axis=[-semi_axis, semi_axis],
@@ -1100,9 +1101,15 @@ if not propagation_curve:
                 sources = [
                 mp.Source(
                         mp.GaussianSource(frequency=frq, fwidth=frq/2), 
+                        component=mp.Hx, 
+                        center=mp.Vector3(wvg_radius, 0),
+                        size=mp.Vector3(wvg_width)),
+                mp.Source(
+                        mp.GaussianSource(frequency=frq, fwidth=frq/2), 
                         component=mp.Ez, 
                         center=mp.Vector3(wvg_radius, 0),
-                        size=mp.Vector3(wvg_width))]  
+                        size=mp.Vector3(wvg_width))
+                        ]  
                 
                 pml_thickness = 1.0
                 pml_layers = [mp.PML(pml_thickness)]
@@ -1117,20 +1124,21 @@ if not propagation_curve:
                 
                 # Define DFT monitoring region for field extraction
                 dft_volume = mp.Volume(
-                center=mp.Vector3(-wvg_radius),
-                size=mp.Vector3(bnd_width * 2, cell_size.y))
-                
-                dft = sim.add_dft_fields([mp.Ez, mp.Hx], [frq], where=dft_volume)
-                
-                # Run simulation for sufficient time for wave to propagate
-                sim.run(until=wvg_radius * 2 * np.pi * wvg_neff)
+                center=mp.Vector3(-wvg_radius-1/sim_resolution),
+                size=mp.Vector3(ext_width * 2, cell_size.y))
 
+                sim.run(until=wvg_radius * 3 * np.pi * wvg_neff)
+                dft = sim.add_dft_fields([mp.Ez, mp.Hx], [frq], where=dft_volume)
+
+                # Run simulation for sufficient time for wave to propagate
+                sim.run(until=wvg_radius * np.pi * wvg_neff)
+                
                 # Extract permittivity distribution over full simulation domain
                 eps_data = sim.get_array(
                         center=mp.Vector3(0, 0, 0),
                         size=cell_size,
                         component=mp.Dielectric)
-                
+
                 # Extract electromagnetic fields from DFT monitors
                 Ez = sim.get_dft_array(dft, mp.Ez, 0)
                 Hx = sim.get_dft_array(dft, mp.Hx, 0)
@@ -1139,6 +1147,8 @@ if not propagation_curve:
                 y_center_index = int(semi_axis * sim_resolution)
                 Ez_profile = Ez[:, y_center_index]
                 Hx_profile = Hx[:, y_center_index]
+
+                # Make the angle of Ez correct
                 center_position = np.argmax(np.abs(Ez_profile))
                 angle = np.angle(Ez_profile[center_position])
                 Ez_profile *= np.exp(-1j*angle)
@@ -1146,90 +1156,106 @@ if not propagation_curve:
                 
                 # Extract corresponding permittivity profile
                 x_index = int((dft_volume.center.x + dft_volume.size.x / 2 + cell_size.x / 2) * sim_resolution)
-                eps_profile = eps_data[:x_index+1, y_center_index]
-                
+                eps_cross = eps_data[:x_index+2, y_center_index]
+  
                 # Spatial discretization step
-                dx = dft_volume.size.x / len(Ez_profile)
+                delta = dft_volume.size.x / sim_resolution
                 
                 # Normalize mode fields (reshape to 2D as expected by function)
                 Ez_normalize, Hx_normalize, neff = SL.normalizing_mode_field(
                         Ez=Ez_profile.reshape(1, -1), 
                         Hy=Hx_profile.reshape(1, -1),
-                        dx=dx, eps_cross=eps_profile)
+                        delta=delta, eps_cross=eps_cross)
                 
                 # Plot normalized field profile
-                cross_axis = np.linspace(-bnd_width/2, bnd_width/2, len(Ez_normalize))
-                ax1.plot(Ez_normalize, label=f'Ez r={wvg_radius}μm, neff={neff:.3f}', linewidth=2)
-                ax1.plot(Hx_normalize, label=f'Hx r={wvg_radius}μm, neff={neff:.3f}', linewidth=2)
-        
-        # Loop through different waveguide widths
-        for wvg_radius in wvg_radii:
-                
+                cross_axis = np.linspace(ext_width, -ext_width, len(Ez_normalize))
+                ax1.plot(cross_axis, Ez_normalize, label=f'r={wvg_radius}μm, neff={neff:.3f}', linewidth=2)
+
+                ### SECOND METHOD ###
                 # Create the material 
-                Nx = int(sim_length * sim_resolution * sub_pixel)
-                Ny = int(sim_width * sim_resolution * sub_pixel)
-                weights = np.zeros((Nx, Ny))
-                for i in range(Nx):
-                        for j in range(Ny):
-                                y = (j - Ny/2) / sim_resolution / sub_pixel
+                Nx = int(sim_length * sim_resolution * sim_sub_pixel)
+                Ny = int(sim_width * sim_resolution * sim_sub_pixel)
+                y_shift = max(sim_width / 2 + wvg_radius * (1 / cld_neff - 1), 0)
 
-                                # Chose neff depending on y position
-                                if abs(y) <= wvg_width/2:
-                                        n = wvg_neff
-                                else:
-                                        n = cld_neff
+                #Vectorized Coordinate Generation
+                j_indices = np.arange(Ny)
 
-                                # Correct refractive index per radius
-                                weights[i, j] = (n * (1 + y/np.sqrt(2)/wvg_radius))**2
+                # Convert indices to simulation coordinates
+                y_coords = (j_indices - Ny/2) / (sim_resolution * sim_sub_pixel) + y_shift
 
-                # Create the material from the grid
-                max_weight = np.max(weights)
-                weights3d = weights[:, :, None] / max_weight
+                # Create Base mask for Index Profile
+                core_mask = np.abs(y_coords) <= wvg_width/2
+                n_profile_high_res = np.where(core_mask, wvg_neff, cld_neff)
+
+                # Generate Weights (With Bend Factor)
+                weights_1d = (n_profile_high_res * (1 + y_coords/wvg_radius))**2
+
+                # Broadcast to 3D for Meep (Nx, Ny, 1)
+                weights_2d = np.tile(weights_1d, (Nx, 1))
+                max_weight = np.max(weights_2d)
+                weights3d = weights_2d[:, :, None] / max_weight
+
+                # Create the material grid
                 material_grid = mp.MaterialGrid(
-                                mp.Vector3(Nx, Ny, 1),
-                                medium1=mp.Medium(epsilon=0),
-                                medium2=mp.Medium(epsilon=max_weight),
-                                weights=weights3d)
-                
+                mp.Vector3(Nx, Ny, 1),
+                medium1=mp.Medium(epsilon=1e-6),
+                medium2=mp.Medium(epsilon=max_weight),
+                weights=weights3d)
+
                 # Assign the material to a block 
                 geometry = [mp.Block(
-                        size=mp.Vector3(sim_length, sim_width, 0),
-                        center=mp.Vector3(),
-                        material=material_grid)]
+                size=mp.Vector3(sim_length, sim_width, 0),
+                center=mp.Vector3(),
+                material=material_grid)]
+                
+                # Generate eps_profile for Mode Solver
+                eps_high_res = n_profile_high_res**2
+
+                # Downsample from 'sub_pixel' resolution to standard 'sim_resolution' (robust)
+                target_len = int(np.round(sim_width * sim_resolution))
+                limit = target_len * sim_sub_pixel
+
+                arr = np.asarray(eps_high_res).flatten()
+                if arr.size < limit:
+                        arr = np.pad(arr, (0, limit - arr.size), mode='edge')
+                elif arr.size > limit:
+                        arr = arr[:limit]
+
+                if target_len <= 0:
+                        eps_cross = np.array([])
+                elif sim_sub_pixel > 1:
+                        eps_cross = arr.reshape(target_len, sim_sub_pixel).mean(axis=1)
+                else:
+                        eps_cross = arr[:target_len]
 
                 # Find the Mode based on the geometry
-                Ez1_cross, Hy1_cross, neff = SL.finding_mode_from_geometry(geometry, 
-                                                                        frequency=frq,
-                                                                        mode=1,
-                                                                        resolution=sim_resolution)
-        
+                Ez1_cross, Hy1_cross, neff = SL.finding_mode_from_geometry(
+                        geometry, frequency=frq, mode=1, 
+                        resolution=sim_resolution, eps_cross=eps_cross)
+                
                 # Define axis of the mode
                 cross_axis = np.linspace(-sim_width/2, sim_width/2, len(Ez1_cross))
-        
+
                 # Plotting with different colors/styles for each width
                 ax2.plot(cross_axis, Ez1_cross, 
-                         label=f'r={wvg_radius}μm, neff={neff:.3f}', 
-                         linewidth=2)
-                ax2.plot(cross_axis, Hy1_cross, 
-                         label=f'r={wvg_radius}μm, neff={neff:.3f}', 
-                         linewidth=2)
+                        label=f'r={wvg_radius}μm, neff={neff:.3f}', linewidth=2)
 
         # Configure axes
         plt_fontsize = 16
-        ax1.set_title('Ez Mode Profile', fontsize=plt_fontsize, fontweight='bold')
+        ax1.set_title('Ez Mode Profile - Ring', fontsize=plt_fontsize, fontweight='bold')
         ax1.set_xlabel('Position [μm]', fontsize=plt_fontsize)
         ax1.set_ylabel('Normalized Field', fontsize=plt_fontsize)
-        ax2.tick_params(axis='both', which='major', labelsize=plt_fontsize)
-        ax1.grid(True)
+        ax1.tick_params(axis='both', which='major', labelsize=plt_fontsize)
         ax1.legend(fontsize=plt_fontsize-2, loc='best')
-
+        ax1.grid(True)
+        
         # Configure subplot with larger fonts
-        ax2.set_title('Ez Mode Profile', fontsize=plt_fontsize, fontweight='bold')
+        ax2.set_title('Ez Mode Profile - Tilt Neff', fontsize=plt_fontsize, fontweight='bold')
         ax2.set_xlabel('Position [μm]', fontsize=plt_fontsize)
         ax2.set_ylabel('Normalized Field', fontsize=plt_fontsize)
-        ax2.legend(fontsize=plt_fontsize, loc='best')
-        ax2.grid(True)
         ax2.tick_params(axis='both', which='major', labelsize=plt_fontsize)
+        ax2.legend(fontsize=plt_fontsize-2, loc='best')
+        ax2.grid(True)
     
         # Show the plot
         plt.show()
