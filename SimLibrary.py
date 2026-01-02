@@ -257,6 +257,13 @@ def normalizing_mode_field(Ez, Hy, delta, eps_cross):
     # Compute effective refractive index from integrated effective permittivity
     neff = np.sqrt(np.sum(eps_eff_cross) * delta)
 
+    # Hy_cross should be Ez_cross * neff, if it doesn't multiply by a factor to fix it
+    center = int(len(Ez_cross)/2)
+    delta = int(center*0.1)
+    correction = np.mean(np.abs(Hy_cross_norm[center-delta:center+delta] / Ez_cross_norm[center-delta:-center+delta]))/neff
+    Ez_cross_norm *= np.sqrt(correction)
+    Hy_cross_norm /= np.sqrt(correction)
+    print(correction)
     return Ez_cross_norm, Hy_cross_norm, neff
 
 def finding_mode_from_geometry(geometry, mode=1, frequency=1, resolution=20, time=50, eps_cross=None):
