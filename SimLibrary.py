@@ -247,6 +247,105 @@ def normalizing_mode_field(Ez, eps_cross, frequency=1, delta=1):
         
         return Ez_cross_norm, neff
 
+
+def finding_mode_from_geometry(geometry, mode=1, frequency=1, resolution=20, time=50, eps_cross=None):
+        """
+        Compute the TE mode fields for a given geometry in a Meep simulation.
+
+        This function calculates the cross-sectional profiles of the electric (Ez) 
+        and magnetic (Hy) fields for a specified TE mode order. The fields are 
+        computed at a given frequency, using a simulation with specified spatial 
+        resolution and run time.
+
+        Parameters
+        ----------
+        geometry : list of mp.GeometricObject
+            The geometry of the simulation region (e.g., blocks, cylinders, etc.).
+        mode : int, optional
+            Mode order to compute (default is 1).
+        frequency : float, optional
+            Frequency at which to calculate the mode (default is 1).
+        resolution : int, optional
+            Spatial resolution of the simulation (default is 20).
+        time : float, optional
+            Total simulation time (in Meep time units) (default is 50).
+        eps_cross : ndarray
+            1D array of permittivity values along the cross-section.
+            If None, uses the one from simulation
+
+        Returns
+        -------
+        Ez_cross_norm : np.ndarray
+            Normalized electric field cross section along the y-axis.
+        neff : float
+            Effective refractive index of the mode.
+
+        Notes
+        -----
+        - The simulation uses a PML boundary with thickness 1.0.
+        - The source is an eigenmode source centered at the left edge of the simulation cell.
+        - Cross sections are taken at the x-coordinate where Ez reaches its maximum.
+        - Fields are normalized to the total optical power of the mode.
+        - The effective index is computed from the normalized field and material distribution.
+        """
+        
+        # Simulation boundary from geometry
+        sim_size, sim_center = compute_geometry_bounds(geometry)
+
+        # Condition for edge of simulation
+        pml_thickness = 1.0
+        pml_layers = [mp.PML(pml_thickness)]
+
+        # Define the source for the mode calculation
+        src_position = -sim_size.x / 2 + pml_thickness + 1 / resolution
+        source = [mp.EigenModeSource(
+            src=mp.ContinuousSource(frequency=frequency),
+            center=mp.Vector3(src_position, 0),
+            size=mp.Vector3(0, sim_size.y),
+            direction=mp.X,
+            eig_band=mode
+        )]
+
+        # Create the meep simulation
+        sim = mp.Simulation(
+            cell_size=sim_size,
+            sources=source,
+            geometry=geometry,
+            resolution=resolution,
+            boundary_layers=pml_layers)
+
+        # Change output directory
+        sim.use_output_directory("Output")
+
+        # Prepare a Discrete Fourier Transform monitor to extract the complex field information
+        frequency_center = 0 
+        frequency_points = 1
+        dft = sim.add_dft_fields([mp.Ez], frequency, frequency_center, frequency_points, 
+                                where=mp.Volume(center=mp.Vector3(),
+                                                size=sim_size))
+
+        # Define the variable to optimize# Physically run the simulation with current setup
+        sim.run(mp.at_beginning(mp.output_epsilon),
+                until=time)
+
+        # Extract complex field component
+        Ez1 = sim.get_dft_array(dft, mp.Ez, 0)
+        
+        # Calculate the positional variation needed for normalization
+        delta = 1 / resolution  
+        
+        # Extract the information about the material
+        if eps_cross is None:
+            eps_data = sim.get_array(
+                component=mp.Dielectric,
+                center=mp.Vector3(),           
+                size=sim_size)
+            eps_cross = eps_data[int(len(eps_data)/2), :]
+        
+        # Return the normalize mode field cross section 
+        return normalizing_mode_field(Ez=Ez1, frequency=frequency, delta=delta, eps_cross=eps_cross)
+
+
 def generate_modal_source(Ez_cross, Hy_cross, cross_axis, src_position, src_size, src_decay=3, frequency=1):
     """
     Create a custom Meep source that generates an electromagnetic mode with specified 
