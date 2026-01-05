@@ -188,7 +188,7 @@ def compute_geometry_bounds(geometry_list):
 
     return bounding_size, bounding_center
 
-def normalizing_mode_field(Ez, eps_cross, frequency=1, delta=1):
+def normalizing_mode_field(Ez, eps_cross, Hy=None, frequency=1, delta=1):
         """
         Normalize electromagnetic field components and calculate effective refractive index.
 
@@ -201,6 +201,10 @@ def normalizing_mode_field(Ez, eps_cross, frequency=1, delta=1):
         ----------
         Ez : ndarray
             2D complex array representing the z-component of the electric field.
+        Hy : ndarray
+            2D complex array representing the y-component of the magnetic field.
+            Not necessarly for the calculation. 
+            If not None, it's normalization cross section is returned.
         eps_cross : ndarray
             1D array of permittivity values along the cross-section.
         frequency : float, optional
@@ -221,7 +225,9 @@ def normalizing_mode_field(Ez, eps_cross, frequency=1, delta=1):
         x_max_index, _ = np.unravel_index(flat_index, Ez.shape)
     
         # Extract cross-sectional field profiles at the maximum intensity location
-        Ez_cross = Ez[x_max_index, :]
+        Ez_cross = np.real(Ez[x_max_index, :])
+        if Hy is not None:
+            Hy_cross = np.real(Hy[x_max_index, :])
 
         # Calculate the intensity of the mode
         intensity = np.abs(Ez_cross)**2
@@ -231,6 +237,8 @@ def normalizing_mode_field(Ez, eps_cross, frequency=1, delta=1):
 
         # Apply correction factor to account for complex field magnitude
         Ez_cross_norm = Ez_cross / np.sqrt(normalization_term)
+        if Hy is not None:
+             Hy_cross_norm = Hy_cross / np.sqrt(normalization_term)
 
         # Propagation constant
         k0 = 2 * np.pi * frequency
@@ -245,7 +253,11 @@ def normalizing_mode_field(Ez, eps_cross, frequency=1, delta=1):
         beta_squared = (permittivity_term - confirment_term) / normalization_term
         neff = np.sqrt(beta_squared) / k0
         
-        return Ez_cross_norm, neff
+        if Hy is None:
+             return Ez_cross_norm, neff
+        else:
+             return Ez_cross_norm, Hy_cross_norm, neff
+             
 
 
 def finding_mode_from_geometry(geometry, mode=1, frequency=1, resolution=20, time=50, eps_cross=None):
@@ -320,7 +332,7 @@ def finding_mode_from_geometry(geometry, mode=1, frequency=1, resolution=20, tim
         # Prepare a Discrete Fourier Transform monitor to extract the complex field information
         frequency_center = 0 
         frequency_points = 1
-        dft = sim.add_dft_fields([mp.Ez], frequency, frequency_center, frequency_points, 
+        dft = sim.add_dft_fields([mp.Ez, mp.Hy], frequency, frequency_center, frequency_points, 
                                 where=mp.Volume(center=mp.Vector3(),
                                                 size=sim_size))
 
@@ -329,7 +341,8 @@ def finding_mode_from_geometry(geometry, mode=1, frequency=1, resolution=20, tim
                 until=time)
 
         # Extract complex field component
-        Ez1 = sim.get_dft_array(dft, mp.Ez, 0)
+        Ez = sim.get_dft_array(dft, mp.Ez, 0)
+        Hy = sim.get_dft_array(dft, mp.Hy, 0)
         
         # Calculate the positional variation needed for normalization
         delta = 1 / resolution  
@@ -343,7 +356,7 @@ def finding_mode_from_geometry(geometry, mode=1, frequency=1, resolution=20, tim
             eps_cross = eps_data[int(len(eps_data)/2), :]
         
         # Return the normalize mode field cross section 
-        return normalizing_mode_field(Ez=Ez1, frequency=frequency, delta=delta, eps_cross=eps_cross)
+        return normalizing_mode_field(Ez=Ez, Hy=Hy, frequency=frequency, delta=delta, eps_cross=eps_cross)
 
 
 def generate_modal_source(Ez_cross, Hy_cross, cross_axis, src_position, src_size, src_decay=3, frequency=1):
