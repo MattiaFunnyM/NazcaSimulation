@@ -52,38 +52,39 @@ cross_section = mp.Volume(
     )
 )
 
-# -------------------------------
-# STORAGE
-# -------------------------------
-dispersion = {}  
 
-# -------------------------------
-# FREQUENCY LOOP
-# -------------------------------
+# Prepare sources
+sources = []
 for f in fs:
 
-    kpoint = mp.Vector3(2 * np.pi * f / wvg_neff, 0, 0)
-
-    sources = [
+    sources.append(
         mp.Source(
             mp.GaussianSource(frequency=f),
             component=mp.Ez,
             center=mp.Vector3(-sim_width/2 + bnd_thickness, 0, 0)
         )
-    ]
-
-    sim = mp.Simulation(
-        cell_size=sim_size,
-        geometry=geometry,
-        resolution=sim_resolution,
-        boundary_layers=[mp.PML(bnd_thickness)],
-        sources=sources,
-        dimensions=3,
-        k_point=kpoint
     )
 
-    sim.run(until=0.1)
+# Initialize simulation
+sim = mp.Simulation(
+    cell_size=sim_size,
+    geometry=geometry,
+    resolution=sim_resolution,
+    boundary_layers=[mp.PML(bnd_thickness)],
+    sources=sources,
+    dimensions=3)
 
+# Run simulation to initialize field (otherwise get_eigenmode fails)
+sim.run(until=0.1)
+
+# -------------------------------
+# FREQUENCY LOOP
+# -------------------------------
+dispersion = {}  
+for f in fs:
+
+    kpoint = mp.Vector3(2 * np.pi * f / wvg_neff, 0, 0)
+   
     k_found = []
 
     for band in range(1, max_bands + 1):
