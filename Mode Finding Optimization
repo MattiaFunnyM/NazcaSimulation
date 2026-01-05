@@ -33,7 +33,7 @@ if not width_found:
         cld_neff = 1.3
         
         # Define different waveguide widths to test
-        wvg_widths = [0.4, 0.35, 0.3, 0.25, 0.2]  # You can modify this list
+        wvg_widths = [0.4, 0.35, 0.3, 0.25, 0.2] 
         
         # Create figure with two subplots side by side
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 7))
@@ -54,16 +54,16 @@ if not width_found:
                                 material=mp.Medium(epsilon=wvg_neff**2))]
             
                         # Mode found
-                        Ez1_cross, Hy1_cross, neff = SL.finding_mode_from_geometry(geometry, 
-                                                                                frequency=frq,
-                                                                                mode=2,
-                                                                                resolution=sim_resolution)
+                        Ez, Hy, neff = SL.finding_mode_from_geometry(geometry, 
+                                                                       frequency=frq,
+                                                                       mode=2,
+                                                                       resolution=sim_resolution)
                 
                         # Define axis of the mode
-                        cross_axis = np.linspace(-sim_width/2, sim_width/2, len(Ez1_cross))
+                        cross_axis = np.linspace(-sim_width/2, sim_width/2, len(Ez))
                 
                         # Plotting with different colors/styles for each width
-                        ax.plot(cross_axis, Ez1_cross, 
+                        ax.plot(cross_axis, Ez, 
                                 label=f'w={wvg_width}μm, neff={neff:.3f}', 
                                 linewidth=2)
         
@@ -72,7 +72,7 @@ if not width_found:
                 ax.set_title(f'Ez Mode Profile {frq:.3f} THz/c', fontsize=plt_fontsize, fontweight='bold')
                 ax.set_xlabel('Position [μm]', fontsize=plt_fontsize)
                 ax.set_ylabel('Normalized Field', fontsize=plt_fontsize)
-                ax.legend(fontsize=plt_fontsize, loc='best')
+                ax.legend(fontsize=plt_fontsize-2, loc='best')
                 ax.grid(True, alpha=0.3)
                 ax.tick_params(axis='both', which='major', labelsize=plt_fontsize)
     
@@ -112,23 +112,23 @@ if not mode_calculated:
                         material=mp.Medium(epsilon=wvg_neff**2))]
 
                 # Mode found
-                Ez1_cross, Hy1_cross, neff = SL.finding_mode_from_geometry(geometry, 
-                                                                        frequency=frq,
-                                                                        mode=1,
-                                                                        resolution=sim_resolution)
+                Ez, Hy, neff = SL.finding_mode_from_geometry(geometry, 
+                                                             frequency=frq,
+                                                             mode=1,
+                                                             resolution=sim_resolution)
 
                 # Define axis of the mode
-                cross_axis = np.linspace(-sim_width/2, sim_width/2, len(Ez1_cross))
+                cross_axis = np.linspace(-sim_width/2, sim_width/2, len(Ez))
 
                 # Plotting with different colors for each wavelength
-                ax.plot(cross_axis, Ez1_cross, 
+                ax.plot(cross_axis, Ez, 
                         label=f'f={frq:.3f}nm, neff={neff:.3f}', 
                         linewidth=2)
 
                 # Saving individual data files for each wavelength
                 data = {
-                "Ez": Ez1_cross.tolist(),
-                "Hy": Hy1_cross.tolist(),
+                "Ez": Ez.tolist(),
+                "Hy": Hy.tolist(),
                 "neff": float(neff),
                 "cross_axis": cross_axis.tolist(),
                 "wvg_width": float(wvg_width),
@@ -138,8 +138,8 @@ if not mode_calculated:
                 # Save individual file
                 file_name_wvg = f"Output/Mode_ex_width{wvg_width}_frequency{frq:.3f}nm.json"
                 file_name_fiber = f"Output/Mode_ex_fiber_frequency{frq:.3f}nm.json"
-                #with open(file_name_wvg if mode_calculated_kind == 'wvg' else file_name_fiber, "w") as f:
-                #        json.dump(data, f)
+                with open(file_name_wvg if mode_calculated_kind == 'wvg' else file_name_fiber, "w") as f:
+                        json.dump(data, f)
 
                 # Configure plot with larger fonts
                 plt_fontsize = 16
@@ -193,28 +193,29 @@ if not propagation_waveguide:
         
         # Create the sources joining all the frequencies
         sources = []
-        Ez1_cross_array = []
-        Hy1_cross_array = []
+        Ez_array = []
+        Hy_array = []
         for frq in frq_simulated:
                 # Load mode from previous calculated one
                 with open(f"Output/Mode_ex_width{wvg_width}_frequency{frq:.3f}nm.json", "r") as f:
                         data = json.load(f)
-                        Ez1_cross = np.array(data["Ez"])
-                        Hy1_cross = np.array(data["Hy"])
+                        Ez = np.array(data["Ez"])
+                        
                         neff = data["neff"]
+                        Hy = np.array(data["Hy"])
                         cross_axis = np.array(data["cross_axis"])
 
                         # Append to array
-                        Ez1_cross_array.append(Ez1_cross)
-                        Hy1_cross_array.append(Hy1_cross)
+                        Ez_array.append(Ez)
+                        Hy_array.append(Hy)
 
                 # Create a source from the mode fields
-                source = SL.generate_modal_source(Ez_cross = Ez1_cross,
-                                                Hy_cross = Hy1_cross,
-                                                cross_axis = np.linspace(-sim_width/2, sim_width/2, len(Ez1_cross)),
-                                                src_position = mp.Vector3(-sim_length / 2 + pml_thickness, 0),
-                                                src_size=mp.Vector3(0, sim_width),
-                                                frequency=frq)
+                source = SL.generate_modal_source(Ez_cross = Ez,
+                                                  Hy_cross = Hy,
+                                                  cross_axis = np.linspace(-sim_width/2, sim_width/2, len(Ez)),
+                                                  src_position = mp.Vector3(-sim_length / 2 + pml_thickness, 0),
+                                                  src_size=mp.Vector3(0, sim_width),
+                                                  frequency=frq)
                 
                 sources.append(source[0])
                 sources.append(source[1])
@@ -264,12 +265,12 @@ if not propagation_waveguide:
                 field_axis = np.linspace(-sim_width/2, sim_width/2, len(ez_data[0]))
                 
                 # Calculate overlap
-                overlap, _ = SL.calculate_modal_overlap(Ez_cross = Ez1_cross_array[idx], 
-                                                Hy_cross = Hy1_cross_array[idx], 
-                                                Ez_field = ez_data, 
-                                                Hy_field = hy_data,
-                                                cross_axis = cross_axis,
-                                                field_axis = field_axis)
+                overlap, _ = SL.calculate_modal_overlap(Ez_cross = Ez_array[idx], 
+                                                        Hy_cross = Hy_array[idx], 
+                                                        Ez_field = ez_data, 
+                                                        Hy_field = hy_data,
+                                                        cross_axis = cross_axis,
+                                                        field_axis = field_axis)
                 
                 # Add overlap to the plot
                 ax2.plot(overlap_axis, overlap, label=f"frq {frq:.3f} THz/c")
