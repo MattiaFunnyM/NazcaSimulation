@@ -3,16 +3,23 @@ import matplotlib.pyplot as plt
 import meep as mp
 import SimLibrary as SL
 import time
+from matplotlib.gridspec import GridSpec
+from matplotlib.widgets import RadioButtons
+from matplotlib.colors import LinearSegmentedColormap
 
+# =========================
+# TIMING
+# =========================
 time_start = time.time()
-# -------------------------------
+
+# =========================
 # USER PARAMETERS
-# -------------------------------
+# =========================
 n_f = 20
 fs = np.linspace(0.1, 1.0, n_f)
 
 sim_length = 2
-sim_width = 3
+sim_width = 2
 sim_height = 2
 sim_resolution = 32
 
@@ -21,21 +28,20 @@ cld_neff = 1.45
 wvg_width = 0.5
 wvg_height = 0.22
 
-bnd_thickness = 0.5
+bnd_thickness = 0.25
 max_bands = 4
-k_tol = 2e-2
 
-# -------------------------------
-# GEOMETRY
-# -------------------------------
+# =========================
+# GEOMETRY DEFINITION
+# =========================
 geometry = [
     mp.Block(
-        size=mp.Vector3(sim_length, sim_width, sim_height),
+        size=mp.Vector3(sim_width, sim_height, sim_length),
         center=mp.Vector3(),
         material=mp.Medium(epsilon=cld_neff**2)
     ),
     mp.Block(
-        size=mp.Vector3(sim_length, wvg_width, wvg_height),
+        size=mp.Vector3(wvg_width, wvg_height, sim_length),
         center=mp.Vector3(),
         material=mp.Medium(epsilon=wvg_neff**2)
     )
@@ -44,113 +50,205 @@ geometry = [
 sim_size, sim_center = SL.compute_geometry_bounds(geometry)
 
 cross_section = mp.Volume(
-    center=mp.Vector3(-0.5 * sim_length + bnd_thickness + 1, 0, 0),
+    center=mp.Vector3(0, 0, 0),
     size=mp.Vector3(
-        0,
-        sim_width  - 2 * bnd_thickness,
-        sim_height - 2 * bnd_thickness
+        sim_width - 2*bnd_thickness,
+        sim_height - 2*bnd_thickness,
+        0
     )
 )
 
-
-# Prepare sources
-sources = []
-for f in fs:
-
-    sources.append(
-        mp.Source(
-            mp.GaussianSource(frequency=f),
-            component=mp.Ez,
-            center=mp.Vector3(-sim_width/2 + bnd_thickness, 0, 0)
-        )
+# =========================
+# SOURCE (needed to initialize fields)
+# =========================
+sources = [
+    mp.Source(
+        mp.GaussianSource(frequency=1),
+        component=mp.Ey,
+        center=mp.Vector3(0, 0, 0)
     )
+]
 
-# Initialize simulation
+# =========================
+# SIMULATION INITIALIZATION
+# =========================
 sim = mp.Simulation(
     cell_size=sim_size,
     geometry=geometry,
     resolution=sim_resolution,
     boundary_layers=[mp.PML(bnd_thickness)],
     sources=sources,
-    dimensions=3)
+    dimensions=3
+)
 
-# Run simulation to initialize field (otherwise get_eigenmode fails)
+# Run a short simulation to initialize fields
 sim.run(until=0.1)
 
-# -------------------------------
-# FREQUENCY LOOP
-# -------------------------------
-dispersion = {}  
-for f in fs:
+# =========================
+# MODE FIELD EXTRACTION FUNCTION
+# =========================
+def extract_mode_field(sim, mode, component, width, height, resolution):
+    """
+    Reconstruct a 2D eigenmode field by sampling the mode amplitude
+    over the transverse cross section.
+    """
+    nx = int(width * resolution)
+    ny = int(height * resolution)
+    field = np.zeros((ny, nx), dtype=complex)
 
-    kpoint = mp.Vector3(2 * np.pi * f / wvg_neff, 0, 0)
-   
-    k_found = []
-
-    for band in range(1, max_bands + 1):
-
-        try:
-            mode = sim.get_eigenmode(
-                frequency=f,
-                direction=mp.X,
-                band_num=band,
-                where=cross_section,
-                kpoint=kpoint
+    for j in range(ny):
+        y = -height / 2 + j / resolution
+        for i in range(nx):
+            x = -width / 2 + i / resolution
+            field[j, i] = mode.amplitude(
+                component=component,
+                point=mp.Vector3(x, y, 0)
             )
-        except RuntimeError:
-            break
+    return field
 
-        k_val = mode.k[0]
+# =========================
+# DISPERSION + MODE DATABASE
+# =========================
+modes_db = []
+
+active_bands = list(range(1, max_bands + 1))
+k_val = fs[-1] * cld_neff
+
+width = sim_width - 2*bnd_thickness
+height = sim_height - 2*bnd_thickness
+
+for f in reversed(fs):
+    bands_to_remove = []
+    for band in active_bands:
+        kpoint = mp.Vector3(0, 0, k_val)
+        mode = sim.get_eigenmode(
+            frequency=f,
+            direction=mp.Z,
+            band_num=band,
+            where=cross_section,
+            kpoint=kpoint,
+            eigensolver_tol=1e-4
+        )
+
+        k_val = mode.k[2]
         f_val = mode.freq
-        
-        # Check uniqueness
-        if any(abs(k_val - k_prev) < k_tol for k_prev in k_found):
-            break
 
-        if np.isnan(k_val) or k_val <= 0:
-            break
+        # Remove unphysical modes
+        if k_val <= 0 or k_val < f_val * cld_neff:
+            bands_to_remove.append(band)
+            continue
 
-        if k_val < f_val * cld_neff + k_tol:
-            break
+        # Extract all components for flexibility
+        Ex_field = extract_mode_field(sim, mode, mp.Ex, width, height, sim_resolution)
+        Ey_field = extract_mode_field(sim, mode, mp.Ey, width, height, sim_resolution)
+        Ez_field = extract_mode_field(sim, mode, mp.Ez, width, height, sim_resolution)
 
-        if band not in dispersion:
-            dispersion[band] = {'k': [], 'f': []}
+        modes_db.append({
+            "band": band,
+            "f": f_val,
+            "k": abs(k_val),
+            "Ex": Ex_field,
+            "Ey": Ey_field,
+            "Ez": Ez_field
+        })
 
-        dispersion[band]['k'].append(abs(k_val))
-        dispersion[band]['f'].append(f_val)
+    for band in bands_to_remove:
+        active_bands.remove(band)
+    if not active_bands:
+        break
 
-        k_val = abs(k_val)
-        k_found.append(k_val)
+# =========================
+# INTERACTIVE VISUALIZATION
+# =========================
+fig = plt.figure(figsize=(14,6))
+gs = GridSpec(1,2,width_ratios=[1.3,1])
 
-# -------------------------------
-# PLOT
-# -------------------------------
-plt.figure(figsize=(7, 5))
+ax_disp = fig.add_subplot(gs[0])
+ax_mode = fig.add_subplot(gs[1])
 
-for band, data in dispersion.items():
-    plt.plot(data['k'], data['f'], color='blue', lw=2)
+# -------------------------
+# Dispersion plot
+# -------------------------
+bands = list(set([m['band'] for m in modes_db]))
+scatter_dict = {}
+lines_dict = {}
 
-f_max = max(max(data['f']) for data in dispersion.values())
+for band in bands:
+    band_points = [m for m in modes_db if m['band']==band]
+    k_band = [m['k'] for m in band_points]
+    f_band = [m['f'] for m in band_points]
+    # Scatter points
+    scatter_dict[band] = ax_disp.scatter(k_band, f_band, color='blue', s=20)
+    # Join points with a line
+    lines_dict[band], = ax_disp.plot(k_band, f_band, '-', color='blue', lw=2)
+
+# Light line
+f_max = max([m['f'] for m in modes_db])
 f_light = np.linspace(0, f_max, 300)
 k_light = f_light * cld_neff
+ax_disp.fill_between(k_light, f_light, f_max, color="#e6a249", alpha=0.7)
+ax_disp.plot(k_light, f_light, color="black", lw=1)
 
-plt.fill_between(
-    k_light,
-    f_light,
-    y2 = f_max,
-    color="#e6a249",
-    alpha=0.9,
-    label='Light line (oxide)'
-)
-plt.plot(k_light, f_light, color='black')
+# Axis formatting
+ax_disp.set_xlabel("Wavevector k", fontsize=16, fontweight='bold')
+ax_disp.set_ylabel("Frequency f", fontsize=16, fontweight='bold')
+ax_disp.tick_params(axis='both', which='major', labelsize=14)
+ax_disp.set_xlim(0,2)
+ax_disp.set_ylim(0,1)
+ax_disp.set_title("Waveguide dispersion", fontsize=16, fontweight='bold')
+for label in ax_disp.get_xticklabels() + ax_disp.get_yticklabels():
+    label.set_fontweight('bold')
+# -------------------------
+# Initial mode plot
+# -------------------------
+component = 'Ex'  # default component
+im = ax_mode.imshow(np.abs(modes_db[0][component]), cmap='YlGnBu',
+                    origin='lower', extent=[-width/2, width/2, -height/2, height/2],
+                    interpolation='bilinear')
+ax_mode.set_title(f'Band {modes_db[0]["band"]} | f={modes_db[0]["f"]:.3f}, k={modes_db[0]["k"]:.3f} | Ex',
+                      fontsize=16, fontweight='bold')
+ax_mode.tick_params(axis='both', which='major', labelsize=14)
+plt.colorbar(im, ax=ax_mode, fraction=0.046)
+for label in ax_mode.get_xticklabels() + ax_mode.get_yticklabels():
+    label.set_fontweight('bold')
+# -------------------------
+# Component selector
+# -------------------------
+rax = plt.axes([0.88, 0.75, 0.05, 0.15])
+radio = RadioButtons(rax, ('Ex','Ey','Ez'), active=0)
+for label in radio.labels:
+    label.set_fontsize(16)
+    label.set_fontweight('bold')
 
-plt.tick_params(axis='both', which='major', labelsize=20)
-plt.xlabel("Wavevector K", fontsize=18, fontweight='bold')
-plt.ylabel("Frequency f", fontsize=18, fontweight='bold')
-plt.title("Waveguide dispersion", fontsize=18, fontweight='bold')
+def update_component(label):
+    global component
+    component = label
+    # Update mode image with currently selected point
+    idx = getattr(update_component, 'last_idx', 0)
+    im.set_data(np.abs(modes_db[idx][component]))
+    ax_mode.set_title(ax_mode.get_title()[:-4] + f'| {component}',
+                      fontsize=16, fontweight='bold')
+    fig.canvas.draw_idle()
+radio.on_clicked(update_component)
+
+# -------------------------
+# Click interaction
+# -------------------------
+def on_click(event):
+    if event.inaxes != ax_disp:
+        return
+    x_click = event.xdata
+    y_click = event.ydata
+    # Find nearest point
+    distances = [( (m['k']-x_click)**2 + (m['f']-y_click)**2 , idx) for idx, m in enumerate(modes_db)]
+    _, idx_closest = min(distances)
+    update_component.last_idx = idx_closest
+    mode_data = modes_db[idx_closest]
+    im.set_data(np.abs(mode_data[component]))
+    ax_mode.set_title(f'Band {mode_data["band"]} | f={mode_data["f"]:.3f}, k={mode_data["k"]:.3f} | {component}',
+                      fontsize=16, fontweight='bold')
+    fig.canvas.draw_idle()
+
+fig.canvas.mpl_connect('button_press_event', on_click)
 plt.tight_layout()
-plt.xlim(0, 2)
-plt.ylim(0, 1)
-time_end = time.time()
-print(time_end - time_start)
 plt.show()
