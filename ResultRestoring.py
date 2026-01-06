@@ -1,22 +1,16 @@
 import numpy as np
-import matplotlib.pyplot as plt
 import meep as mp
 import SimLibrary as SL
-import time
+import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from matplotlib.widgets import RadioButtons
 from matplotlib.colors import LinearSegmentedColormap
 
 # =========================
-# TIMING
-# =========================
-time_start = time.time()
-
-# =========================
 # USER PARAMETERS
 # =========================
 n_f = 20
-fs = np.linspace(0.1, 1.0, n_f)
+fs = np.linspace(0.4, 1.0, n_f)
 
 sim_length = 2
 sim_width = 2
@@ -38,12 +32,17 @@ geometry = [
     mp.Block(
         size=mp.Vector3(sim_width, sim_height, sim_length),
         center=mp.Vector3(),
-        material=mp.Medium(epsilon=cld_neff**2)
+        material=mp.Medium(epsilon=1)
     ),
     mp.Block(
         size=mp.Vector3(wvg_width, wvg_height, sim_length),
         center=mp.Vector3(),
         material=mp.Medium(epsilon=wvg_neff**2)
+    ),
+    mp.Block(
+        size=mp.Vector3(sim_width, sim_height/2-wvg_height/2, sim_length),
+        center=mp.Vector3(0, -sim_height/4-wvg_height/4),
+        material=mp.Medium(epsilon=cld_neff**2)
     )
 ]
 
@@ -133,11 +132,6 @@ for f in reversed(fs):
         k_val = mode.k[2]
         f_val = mode.freq
 
-        # Remove unphysical modes
-        if k_val <= 0 or k_val < f_val * cld_neff:
-            bands_to_remove.append(band)
-            continue
-
         # Extract all components for flexibility
         Ex_field = extract_mode_field(sim, mode, mp.Ex, width, height, sim_resolution)
         Ey_field = extract_mode_field(sim, mode, mp.Ey, width, height, sim_resolution)
@@ -151,6 +145,11 @@ for f in reversed(fs):
             "Ey": Ey_field,
             "Ez": Ez_field
         })
+
+        # Remove unphysical modes
+        if k_val <= 0 or k_val < f_val * cld_neff:
+            bands_to_remove.append(band)
+            continue
 
     for band in bands_to_remove:
         active_bands.remove(band)
@@ -173,21 +172,21 @@ bands = list(set([m['band'] for m in modes_db]))
 scatter_dict = {}
 lines_dict = {}
 
+# Light line
+f_max = max([m['f'] for m in modes_db])
+f_light = np.linspace(0, f_max, 300)
+k_light = f_light * cld_neff
+ax_disp.fill_between(k_light, f_light, f_max, color="#e6a249")
+ax_disp.plot(k_light, f_light, color="black", lw=1, zorder=1)
+
 for band in bands:
     band_points = [m for m in modes_db if m['band']==band]
     k_band = [m['k'] for m in band_points]
     f_band = [m['f'] for m in band_points]
     # Scatter points
-    scatter_dict[band] = ax_disp.scatter(k_band, f_band, color='blue', s=20)
+    scatter_dict[band] = ax_disp.scatter(k_band, f_band, color='blue', s=20, zorder=0)
     # Join points with a line
-    lines_dict[band], = ax_disp.plot(k_band, f_band, '-', color='blue', lw=2)
-
-# Light line
-f_max = max([m['f'] for m in modes_db])
-f_light = np.linspace(0, f_max, 300)
-k_light = f_light * cld_neff
-ax_disp.fill_between(k_light, f_light, f_max, color="#e6a249", alpha=0.7)
-ax_disp.plot(k_light, f_light, color="black", lw=1)
+    lines_dict[band], = ax_disp.plot(k_band, f_band, '-', color='blue', lw=2, zorder=0)
 
 # Axis formatting
 ax_disp.set_xlabel("Wavevector k", fontsize=16, fontweight='bold')
