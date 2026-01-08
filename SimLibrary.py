@@ -3,6 +3,192 @@ import numpy as np
 from matplotlib.path import Path
 from scipy.interpolate import interp1d
 
+################################################################################
+#################### FULL 3D SIMULATION FUNCTIONS ##############################
+################################################################################
+
+def compute_geometry_bounds(geometry_list):
+    """
+    Compute the bounding box that contains all objects in a Meep geometry list.
+
+    This function calculates the smallest rectangular prism (bounding box) 
+    that fully encloses all the objects in the provided Meep geometry list. 
+    It returns both the size and the center of the bounding box.
+
+    Parameters
+    ----------
+    geometry_list : list of mp.GeometricObject
+        List of Meep geometric objects (e.g., blocks, prisms) to include 
+        in the bounding box calculation.
+
+    Returns
+    -------
+    bounding_size : mp.Vector3
+        Size of the bounding box along each axis (x, y, z).
+    bounding_center : mp.Vector3
+        Center position of the bounding box.
+
+    """
+   
+    # Init bounds with infinities
+    xmin, ymin, zmin = np.inf, np.inf, np.inf
+    xmax, ymax, zmax = -np.inf, -np.inf, -np.inf
+
+    for obj in geometry_list:
+        # Extract bounding points based on object type
+        if isinstance(obj, mp.Prism):
+            # For Prism: extract vertices and height
+            vertices = obj.vertices
+            height = obj.height if obj.height != mp.inf else 0
+            axis = obj.axis if hasattr(obj, 'axis') else mp.Vector3(0, 0, 1)
+
+            # Compute height vector along the axis
+            V = mp.Vector3(axis.x * height / 2, axis.y * height / 2, axis.z * height / 2)
+         
+            # Create 3D points from 2D vertices +/- height vector
+            points = []
+            for vertex in vertices:
+                # Add points at both ends along the axis
+                points.extend([
+                    (vertex.x - V.x, vertex.y - V.y, vertex.z - V.z),
+                    (vertex.x + V.x, vertex.y + V.y, vertex.z + V.z),
+                ])
+        else:
+            # For objects with .size: create corner points
+            size = obj.size
+            center = obj.center
+        
+            hx, hy, hz = size.x / 2, size.y / 2, size.z / 2
+            
+            # Generate all 8 corners of the bounding box
+            points = [
+                (center.x - hx, center.y - hy, center.z - hz),
+                (center.x + hx, center.y - hy, center.z - hz),
+                (center.x - hx, center.y + hy, center.z - hz),
+                (center.x + hx, center.y + hy, center.z - hz),
+                (center.x - hx, center.y - hy, center.z + hz),
+                (center.x + hx, center.y - hy, center.z + hz),
+                (center.x - hx, center.y + hy, center.z + hz),
+                (center.x + hx, center.y + hy, center.z + hz),
+            ]
+        
+        # Update global bounds from all points
+        for x, y, z in points:
+            xmin = min(xmin, x)
+            xmax = max(xmax, x)
+            ymin = min(ymin, y)
+            ymax = max(ymax, y)
+            zmin = min(zmin, z)
+            zmax = max(zmax, z)
+
+    # Create final mp.Vector3
+    bounding_size = mp.Vector3(xmax - xmin, ymax - ymin, zmax - zmin)
+    bounding_center = mp.Vector3((xmin + xmax)/2, (ymin + ymax)/2, (zmin + zmax)/2)
+
+    return bounding_size, bounding_center
+
+def find_mode_from_cross_section(geometry, cross_section, mode_order, frequency, sim_resolution=32):
+    """
+    Uses meep internal functions to find the mode of given mode_order from
+    the provided cross_section. Cross section is taking by compiling the 
+    geometry and taking the material at the cross_section volume.
+    The mode is calculated at the given frequency.
+    Field is expected to propagate along the z direction.
+    Simulation resolution decide the amount of points per unit length.
+
+    Return:
+    dictionary with the field components and effective index of the mode.
+    Parameters
+    ----------
+        frequency : float,
+            Frequency at which to calculate the mode.
+        mode_order : int,
+            Mode order to compute (1 for fundamental mode).
+        k_value : mp.Vector3,   
+            k-point vector for mode calculation.
+        Ex : ndarray
+            2D complex array representing the x-component of the electric field.
+        Ey : ndarray
+            2D complex array representing the y-component of the electric field.
+        Ez : ndarray
+            2D complex array representing the z-component of the electric field.
+        Hx : ndarray
+            2D complex array representing the x-component of the magnetic field.
+        Hy : ndarray
+            2D complex array representing the y-component of the magnetic field.
+        Hz : ndarray
+            2D complex array representing the z-component of the magnetic field.
+        neff : float
+            Effective refractive index of the mode.
+    """
+    # Take the simulation size and center from its geometry
+    sim_size, sim_center = compute_geometry_bounds(geometry)
+
+    # Define the source needed only to initialize the fields
+    sources = [mp.Source(
+        mp.GaussianSource(frequency=1),
+        component=mp.Ey,
+        center=mp.Vector3(0, 0, 0))]
+    
+    # Initialize Simulation
+    sim = mp.Simulation(
+    cell_size=sim_size,
+    geometry=geometry,
+    resolution=sim_resolution,
+    sources=sources,
+    dimensions=3)
+
+    # Run a short simulation to initialize fields
+    sim.run(until=1/sim_resolution)
+     
+    # Perform the mode_calculation at the given cross section and frequency
+    mode = sim.get_eigenmode(
+        frequency=frequency,
+        direction=mp.Z,
+        band_num=mode_order,
+        where=cross_section,
+        kpoint=mp.Vector3(0, 0, 1),
+        eigensolver_tol=1e-4
+    )
+
+    # Extract the field components over the entire cross section
+    y_points = np.linspace(-sim_size.y/2, sim_size.y/2, int(sim_size.y*sim_resolution))
+    x_points = np.linspace(-sim_size.x/2, sim_size.x/2, int(sim_size.x*sim_resolution))
+    Ex = np.array([[mode.amplitude(component=mp.Ex, point=mp.Vector3(x, y, 0)) 
+                    for x in x_points] for y in y_points])
+    Ey = np.array([[mode.amplitude(component=mp.Ey, point=mp.Vector3(x, y, 0)) 
+                    for x in x_points] for y in y_points])
+    Ez = np.array([[mode.amplitude(component=mp.Ez, point=mp.Vector3(x, y, 0)) 
+                    for x in x_points] for y in y_points])
+    Hx = np.array([[mode.amplitude(component=mp.Hx, point=mp.Vector3(x, y, 0)) 
+                    for x in x_points] for y in y_points])
+    Hy = np.array([[mode.amplitude(component=mp.Hy, point=mp.Vector3(x, y, 0))
+                    for x in x_points] for y in y_points])
+    Hz = np.array([[mode.amplitude(component=mp.Hz, point=mp.Vector3(x, y, 0)) 
+                    for x in x_points] for y in y_points])
+    k_value = mode.k[2]
+    neff = k_value / (2 * np.pi * frequency)
+
+    # Create the output dictionary
+    output = {
+        'frequency': frequency,
+        'mode_order': mode_order,
+        'k_value': k_value,
+        'Ex': Ex,
+        'Ey': Ey,
+        'Ez': Ez,
+        'Hx': Hx,
+        'Hy': Hy,
+        'Hz': Hz,
+        'neff': neff
+    }
+
+    return output
+
+################################################################################
+##################### RAW 2D SIMULATION FUNCTIONS ##############################
+################################################################################
+
 def polygon_to_materialgrid(vertices, medium_outside, medium_inside, sub_resolution=20, x_axis=None, y_axis=None):
     """
     Convert a polygon defined by vertices into a 2D MaterialGrid.
@@ -108,86 +294,6 @@ def polygon_to_materialgrid(vertices, medium_outside, medium_inside, sub_resolut
     )
     return matgrid
 
-def compute_geometry_bounds(geometry_list):
-    """
-    Compute the bounding box that contains all objects in a Meep geometry list.
-
-    This function calculates the smallest rectangular prism (bounding box) 
-    that fully encloses all the objects in the provided Meep geometry list. 
-    It returns both the size and the center of the bounding box.
-
-    Parameters
-    ----------
-    geometry_list : list of mp.GeometricObject
-        List of Meep geometric objects (e.g., blocks, prisms) to include 
-        in the bounding box calculation.
-
-    Returns
-    -------
-    bounding_size : mp.Vector3
-        Size of the bounding box along each axis (x, y, z).
-    bounding_center : mp.Vector3
-        Center position of the bounding box.
-
-    """
-   
-    # Init bounds with infinities
-    xmin, ymin, zmin = np.inf, np.inf, np.inf
-    xmax, ymax, zmax = -np.inf, -np.inf, -np.inf
-
-    for obj in geometry_list:
-        # Extract bounding points based on object type
-        if isinstance(obj, mp.Prism):
-            # For Prism: extract vertices and height
-            vertices = obj.vertices
-            height = obj.height if obj.height != mp.inf else 0
-            axis = obj.axis if hasattr(obj, 'axis') else mp.Vector3(0, 0, 1)
-
-            # Compute height vector along the axis
-            V = mp.Vector3(axis.x * height / 2, axis.y * height / 2, axis.z * height / 2)
-         
-            # Create 3D points from 2D vertices +/- height vector
-            points = []
-            for vertex in vertices:
-                # Add points at both ends along the axis
-                points.extend([
-                    (vertex.x - V.x, vertex.y - V.y, vertex.z - V.z),
-                    (vertex.x + V.x, vertex.y + V.y, vertex.z + V.z),
-                ])
-        else:
-            # For objects with .size: create corner points
-            size = obj.size
-            center = obj.center
-        
-            hx, hy, hz = size.x / 2, size.y / 2, size.z / 2
-            
-            # Generate all 8 corners of the bounding box
-            points = [
-                (center.x - hx, center.y - hy, center.z - hz),
-                (center.x + hx, center.y - hy, center.z - hz),
-                (center.x - hx, center.y + hy, center.z - hz),
-                (center.x + hx, center.y + hy, center.z - hz),
-                (center.x - hx, center.y - hy, center.z + hz),
-                (center.x + hx, center.y - hy, center.z + hz),
-                (center.x - hx, center.y + hy, center.z + hz),
-                (center.x + hx, center.y + hy, center.z + hz),
-            ]
-        
-        # Update global bounds from all points
-        for x, y, z in points:
-            xmin = min(xmin, x)
-            xmax = max(xmax, x)
-            ymin = min(ymin, y)
-            ymax = max(ymax, y)
-            zmin = min(zmin, z)
-            zmax = max(zmax, z)
-
-    # Create final mp.Vector3
-    bounding_size = mp.Vector3(xmax - xmin, ymax - ymin, zmax - zmin)
-    bounding_center = mp.Vector3((xmin + xmax)/2, (ymin + ymax)/2, (zmin + zmax)/2)
-
-    return bounding_size, bounding_center
-
 def normalizing_mode_field(Ez, eps_cross, Hy=None, frequency=1, delta=1):
         """
         Normalize electromagnetic field components and calculate effective refractive index.
@@ -258,8 +364,6 @@ def normalizing_mode_field(Ez, eps_cross, Hy=None, frequency=1, delta=1):
         else:
              return Ez_cross_norm, Hy_cross_norm, neff
              
-
-
 def finding_mode_from_geometry(geometry, mode=1, frequency=1, resolution=20, time=50, eps_cross=None):
         """
         Compute the TE mode fields for a given geometry in a Meep simulation.
@@ -357,7 +461,6 @@ def finding_mode_from_geometry(geometry, mode=1, frequency=1, resolution=20, tim
         
         # Return the normalize mode field cross section 
         return normalizing_mode_field(Ez=Ez, Hy=Hy, frequency=frequency, delta=delta, eps_cross=eps_cross)
-
 
 def generate_modal_source(Ez_cross, Hy_cross, cross_axis, src_position, src_size, src_decay=3, frequency=1):
     """

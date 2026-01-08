@@ -46,8 +46,6 @@ geometry = [
     )
 ]
 
-sim_size, sim_center = SL.compute_geometry_bounds(geometry)
-
 cross_section = mp.Volume(
     center=mp.Vector3(0, 0, 0),
     size=mp.Vector3(
@@ -58,96 +56,25 @@ cross_section = mp.Volume(
 )
 
 # =========================
-# SOURCE (needed to initialize fields)
-# =========================
-sources = [
-    mp.Source(
-        mp.GaussianSource(frequency=1),
-        component=mp.Ey,
-        center=mp.Vector3(0, 0, 0)
-    )
-]
-
-# =========================
-# SIMULATION INITIALIZATION
-# =========================
-sim = mp.Simulation(
-    cell_size=sim_size,
-    geometry=geometry,
-    resolution=sim_resolution,
-    boundary_layers=[mp.PML(bnd_thickness)],
-    sources=sources,
-    dimensions=3
-)
-
-# Run a short simulation to initialize fields
-sim.run(until=0.1)
-
-# =========================
-# MODE FIELD EXTRACTION FUNCTION
-# =========================
-def extract_mode_field(sim, mode, component, width, height, resolution):
-    """
-    Reconstruct a 2D eigenmode field by sampling the mode amplitude
-    over the transverse cross section.
-    """
-    nx = int(width * resolution)
-    ny = int(height * resolution)
-    field = np.zeros((ny, nx), dtype=complex)
-
-    for j in range(ny):
-        y = -height / 2 + j / resolution
-        for i in range(nx):
-            x = -width / 2 + i / resolution
-            field[j, i] = mode.amplitude(
-                component=component,
-                point=mp.Vector3(x, y, 0)
-            )
-    return field
-
-# =========================
 # DISPERSION + MODE DATABASE
 # =========================
 modes_db = []
-
 active_bands = list(range(1, max_bands + 1))
-k_val = fs[-1] * cld_neff
-
-width = sim_width - 2*bnd_thickness
-height = sim_height - 2*bnd_thickness
 
 for f in reversed(fs):
     bands_to_remove = []
     for band in active_bands:
-        kpoint = mp.Vector3(0, 0, k_val)
-        mode = sim.get_eigenmode(
-            frequency=f,
-            direction=mp.Z,
-            band_num=band,
-            where=cross_section,
-            kpoint=kpoint,
-            eigensolver_tol=1e-4
-        )
+        output = SL.find_mode_from_cross_section(
+            geometry = geometry, 
+            cross_section = cross_section, 
+            mode_order=band, 
+            frequency=f, 
+            sim_resolution=32)
 
-        k_val = mode.k[2]
-        f_val = mode.freq
-
-        # Extract all components for flexibility
-        Ex_field = extract_mode_field(sim, mode, mp.Ex, width, height, sim_resolution)
-        Ey_field = extract_mode_field(sim, mode, mp.Ey, width, height, sim_resolution)
-        Ez_field = extract_mode_field(sim, mode, mp.Ez, width, height, sim_resolution)
-
-        modes_db.append({
-            "band": band,
-            "f": f_val,
-            "k": abs(k_val),
-            "Ex": Ex_field,
-            "Ey": Ey_field,
-            "Ez": Ez_field
-        })
+        modes_db.append(output)
 
         # Remove unphysical modes
-        if k_val <= 0 or k_val < f_val * cld_neff:
+        if output['k_value'] <= 0 or output['k_value'] < output['frequency'] * cld_neff:
             bands_to_remove.append(band)
             continue
 
@@ -168,21 +95,23 @@ ax_mode = fig.add_subplot(gs[1])
 # -------------------------
 # Dispersion plot
 # -------------------------
-bands = list(set([m['band'] for m in modes_db]))
+width = sim_width - 2*bnd_thickness
+height = sim_height - 2*bnd_thickness
+bands = list(set([m['mode_order'] for m in modes_db]))
 scatter_dict = {}
 lines_dict = {}
 
 # Light line
-f_max = max([m['f'] for m in modes_db])
+f_max = max([m['frequency'] for m in modes_db])
 f_light = np.linspace(0, f_max, 300)
 k_light = f_light * cld_neff
 ax_disp.fill_between(k_light, f_light, f_max, color="#e6a249")
 ax_disp.plot(k_light, f_light, color="black", lw=1, zorder=1)
 
 for band in bands:
-    band_points = [m for m in modes_db if m['band']==band]
-    k_band = [m['k'] for m in band_points]
-    f_band = [m['f'] for m in band_points]
+    band_points = [m for m in modes_db if m['mode_order']==band]
+    k_band = [m['k_value'] for m in band_points]
+    f_band = [m['frequency'] for m in band_points]
     # Scatter points
     scatter_dict[band] = ax_disp.scatter(k_band, f_band, color='blue', s=20, zorder=0)
     # Join points with a line
@@ -204,7 +133,7 @@ component = 'Ex'  # default component
 im = ax_mode.imshow(np.abs(modes_db[0][component]), cmap='YlGnBu',
                     origin='lower', extent=[-width/2, width/2, -height/2, height/2],
                     interpolation='bilinear')
-ax_mode.set_title(f'Band {modes_db[0]["band"]} | f={modes_db[0]["f"]:.3f}, k={modes_db[0]["k"]:.3f} | Ex',
+ax_mode.set_title(f'Band {modes_db[0]["mode_order"]} | f={modes_db[0]["frequency"]:.3f}, k={modes_db[0]["k_value"]:.3f} | Ex',
                       fontsize=16, fontweight='bold')
 ax_mode.tick_params(axis='both', which='major', labelsize=14)
 plt.colorbar(im, ax=ax_mode, fraction=0.046)
@@ -239,12 +168,12 @@ def on_click(event):
     x_click = event.xdata
     y_click = event.ydata
     # Find nearest point
-    distances = [( (m['k']-x_click)**2 + (m['f']-y_click)**2 , idx) for idx, m in enumerate(modes_db)]
+    distances = [( (m['k_value']-x_click)**2 + (m['frequency']-y_click)**2 , idx) for idx, m in enumerate(modes_db)]
     _, idx_closest = min(distances)
     update_component.last_idx = idx_closest
     mode_data = modes_db[idx_closest]
     im.set_data(np.abs(mode_data[component]))
-    ax_mode.set_title(f'Band {mode_data["band"]} | f={mode_data["f"]:.3f}, k={mode_data["k"]:.3f} | {component}',
+    ax_mode.set_title(f'Band {mode_data["mode_order"]} | f={mode_data["frequency"]:.3f}, k={mode_data["k_value"]:.3f} | {component}',
                       fontsize=16, fontweight='bold')
     fig.canvas.draw_idle()
 
