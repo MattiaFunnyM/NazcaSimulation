@@ -4,11 +4,11 @@ import SimLibrary as SL
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from matplotlib.widgets import RadioButtons
-from matplotlib.colors import LinearSegmentedColormap
 
 # =========================
 # USER PARAMETERS
 # =========================
+document_url = "http://www.simpetus.com/projects_scheme.html"
 n_f = 20
 fs = np.linspace(0.4, 1.0, n_f)
 
