@@ -1,5 +1,6 @@
 import meep as mp
 import numpy as np
+import matplotlib.pyplot as plt
 from matplotlib.path import Path
 from scipy.interpolate import interp1d
 
@@ -86,6 +87,63 @@ def compute_geometry_bounds(geometry_list):
     bounding_center = mp.Vector3((xmin + xmax)/2, (ymin + ymax)/2, (zmin + zmax)/2)
 
     return bounding_size, bounding_center
+
+
+def visualize_geometry(geometry, resolution=32):
+    """
+    Visualize the refractive-index distribution of a Meep geometry.
+
+    This function initializes a minimal Meep simulation containing the provided
+    geometry displays the result as a 2D color map. 
+
+    Parameters
+    ----------
+    geometry : list of mp.GeometricObject
+        List of Meep geometric objects (e.g., mp.Block) defining the material
+        distribution in the simulation cell.
+    resolution : int, optional
+        Spatial resolution in pixels per micron used to discretize the geometry.
+        This parameter affects only the visualization fidelity and not numerical
+        accuracy of electromagnetic solutions. Default is 32.
+    """
+    
+    cell_size, cell_center = SL.compute_geometry_bounds(geometry)
+    sim = mp.Simulation(
+        cell_size=cell_size,
+        geometry=geometry,
+        resolution=resolution)
+
+    # Initialize simulation (no sources needed)
+    sim.init_sim()
+
+    # Get epsilon grid
+    eps = sim.get_array(
+        center=mp.Vector3(),
+        size=cell_size,
+        component=mp.Dielectric
+    )
+
+    # Convert epsilon → refractive index
+    n = np.sqrt(eps)
+
+    # Plot
+    plt.figure(figsize=(6, 6))
+    plt.imshow(
+        n.T,
+        interpolation="nearest",
+        origin="lower",
+        cmap="viridis",
+        extent=[
+            -cell_size.x/2, cell_size.x/2,
+            -cell_size.y/2, cell_size.y/2
+        ]
+    )
+    plt.colorbar(label="Refractive index n")
+    plt.xlabel("x (µm)")
+    plt.ylabel("y (µm)")
+    plt.tight_layout()
+    plt.show()
+
 
 def find_mode_from_cross_section(geometry, cross_section, mode_order, frequency, sim_resolution=32):
     """
