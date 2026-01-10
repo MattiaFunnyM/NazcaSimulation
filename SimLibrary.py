@@ -54,6 +54,32 @@ def compute_geometry_bounds(geometry_list):
                     (vertex.x - V.x, vertex.y - V.y, vertex.z - V.z),
                     (vertex.x + V.x, vertex.y + V.y, vertex.z + V.z),
                 ])
+        if isinstance(obj, mp.Cylinder):
+            # For cylinder we have the radius, the height and the center
+            center = obj.center
+            radius = obj.radius
+            height = obj.height if obj.height != mp.inf else 0
+
+            # Extract the axis to know in which direction the cylinder is oriented
+            axis = obj.axis if hasattr(obj, "axis") else mp.Vector3(0, 0, 1)
+            ax, ay, az = axis.x, axis.y, axis.z
+  
+            # Half-extents of the AABB
+            dx = abs(ax)*(height/2) + radius*np.sqrt(max(0.0, 1-ax*ax))
+            dy = abs(ay)*(height/2) + radius*np.sqrt(max(0.0, 1-ay*ay))
+            dz = abs(az)*(height/2) + radius*np.sqrt(max(0.0, 1-az*az))
+
+            # Calculate points for the cylinder
+            points = [
+                (center.x - dx, center.y - dy, center.z - dz),
+                (center.x + dx, center.y - dy, center.z - dz),
+                (center.x - dx, center.y + dy, center.z - dz),
+                (center.x + dx, center.y + dy, center.z - dz),
+                (center.x - dx, center.y - dy, center.z + dz),
+                (center.x + dx, center.y - dy, center.z + dz),
+                (center.x - dx, center.y + dy, center.z + dz),
+                (center.x + dx, center.y + dy, center.z + dz),
+            ]
         else:
             # For objects with .size: create corner points
             size = obj.size
@@ -107,7 +133,7 @@ def visualize_geometry(geometry, resolution=32):
         accuracy of electromagnetic solutions. Default is 32.
     """
     
-    cell_size, cell_center = SL.compute_geometry_bounds(geometry)
+    cell_size, cell_center = compute_geometry_bounds(geometry)
     sim = mp.Simulation(
         cell_size=cell_size,
         geometry=geometry,
@@ -213,8 +239,12 @@ def find_mode_from_cross_section(geometry, cross_section, mode_order, frequency,
     )
 
     # Extract the field components over the entire cross section
-    y_points = np.linspace(-sim_size.y/2, sim_size.y/2, int(sim_size.y*sim_resolution))
-    x_points = np.linspace(-sim_size.x/2, sim_size.x/2, int(sim_size.x*sim_resolution))
+    x_min = cross_section.center.x - cross_section.size.x / 2
+    x_max = cross_section.center.x + cross_section.size.x / 2
+    y_min = cross_section.center.y - cross_section.size.y / 2
+    y_max = cross_section.center.y + cross_section.size.y / 2
+    y_points = np.linspace(y_min, y_max, int(sim_size.y*sim_resolution))
+    x_points = np.linspace(x_min, x_max, int(sim_size.x*sim_resolution))
     Ex = np.array([[mode.amplitude(component=mp.Ex, point=mp.Vector3(x, -y, 0)) 
                     for x in x_points] for y in y_points])
     Ey = np.array([[mode.amplitude(component=mp.Ey, point=mp.Vector3(x, -y, 0)) 
