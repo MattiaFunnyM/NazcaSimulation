@@ -107,7 +107,7 @@ def visualize_geometry(geometry, resolution=32):
         accuracy of electromagnetic solutions. Default is 32.
     """
     
-    cell_size, cell_center = compute_geometry_bounds(geometry)
+    cell_size, cell_center = SL.compute_geometry_bounds(geometry)
     sim = mp.Simulation(
         cell_size=cell_size,
         geometry=geometry,
@@ -122,6 +122,9 @@ def visualize_geometry(geometry, resolution=32):
         size=cell_size,
         component=mp.Dielectric
     )
+
+    # Get central cross section
+    eps = eps[:, :, int(eps.shape[2]/2)]
 
     # Convert epsilon → refractive index
     n = np.sqrt(eps)
