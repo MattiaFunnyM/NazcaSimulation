@@ -107,7 +107,7 @@ def visualize_geometry(geometry, resolution=32):
         accuracy of electromagnetic solutions. Default is 32.
     """
     
-    cell_size, cell_center = SL.compute_geometry_bounds(geometry)
+    cell_size, cell_center = compute_geometry_bounds(geometry)
     sim = mp.Simulation(
         cell_size=cell_size,
         geometry=geometry,
