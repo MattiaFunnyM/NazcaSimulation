@@ -174,6 +174,89 @@ def visualize_geometry(geometry, resolution=32):
     plt.show()
 
 
+def visualize_condensated_field(Field3D, propagation_dir = 'z', wide_dir = 'x', x_range = None, y_range = None, colormap = None):
+    """
+    Condensate a 3D field by summing its magnitude over the remaining direction and visualize it.
+
+    This function takes a 3D complex field, calculates the magnitude of each
+    complex value, and then condenses the field into a 2D representation. This
+    condensation is achieved by summing the magnitudes along the axis that is
+    neither the specified `propagation_dir` nor the `wide_dir`.
+    The resulting 2D field is then displayed as an image using matplotlib, with
+    optional custom axis numerical ranges and a specified colormap.
+
+    Parameters
+    ----------
+    Field3D : np.ndarray
+              3D complex field with dimensions (Nx, Ny, Nz). The indices 0, 1, 2
+              correspond internally to 'x', 'y', 'z' directions respectively.
+    propagation_dir : str, optional
+        'x', 'y', or 'z'. This specifies the primary direction of propagation.
+    wide_dir : str, optional
+        'x', 'y', or 'z'. This specifies the "wide" or transverse direction to
+        be retained in the 2D field. 
+    x_range : tuple or list of 2 floats, optional
+        Custom numerical range `(min_val, max_val)` for the x-axis of the plot.
+    y_range : tuple or list of 2 floats, optional
+        Custom numerical range `(min_val, max_val)` for the y-axis of the plot.
+    colormap : str, optional
+        Name of a valid matplotlib colormap to use for the image.
+    """
+
+    dir_map = {'x': 0, 'y': 1, 'z': 2}
+
+    if propagation_dir not in dir_map or wide_dir not in dir_map:
+        raise ValueError("propagation_dir and wide_dir must be 'x', 'y', or 'z'")
+    if propagation_dir == wide_dir:
+        raise ValueError("Propagation and wide directions must be different.")
+
+    prop_axis = dir_map[propagation_dir]
+    wide_axis = dir_map[wide_dir]
+
+    # Determine the axis to sum over
+    cond_axis = list({0, 1, 2} - {prop_axis, wide_axis})[0]
+
+    # Perform the condensation by summing the absolute values along the determined axis
+    Field3D_cond = np.sum(np.abs(Field3D), axis=cond_axis)
+
+    # --- Plotting the condensed field ---
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    # Use the specified colormap or default to None (matplotlib's default)
+    current_cmap = colormap if colormap else None
+
+    # Display the condensed field as an image
+    im = ax.imshow(Field3D_cond, cmap=current_cmap)
+
+    # Set x-axis range and bold tick labels if provided
+    if x_range is not None:
+        ax.set_xlim(x_range[0], x_range[1])
+        for tick in ax.get_xticklabels():
+            tick.set_fontweight('bold')
+    else:
+        # If no range is assigned, remove x-axis tick marks and labels
+        ax.set_xticks([])
+        ax.set_xticklabels([])
+
+    # Set y-axis range and bold tick labels if provided
+    if y_range is not None:
+        ax.set_ylim(y_range[0], y_range[1])
+        for tick in ax.get_yticklabels():
+            tick.set_fontweight('bold')
+    else:
+        # If no range is assigned, remove x-axis tick marks and labels
+        ax.set_yticks([])
+        ax.set_yticklabels([])
+
+    # Add a color bar
+    cbar = plt.colorbar(im, ax=ax, shrink=0.7)
+    for t in cbar.ax.get_yticklabels(): # For a vertical colorbar, these are y-tick labels
+        t.set_fontweight('bold')
+
+    plt.tight_layout() 
+    plt.show()
+
+
 def find_mode_from_cross_section(geometry, cross_section, mode_order, frequency, sim_resolution=32):
     """
     Uses meep internal functions to find the mode of given mode_order from
