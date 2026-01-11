@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 # USER PARAMETERS
 # =========================
 document_url = "https://www.mdpi.com/2304-6732/10/5/510"
+
+# Waveguide parameters
 n_Si   = 3.48
 n_SiO2 = 1.44
 n_SiN  = 1.97
@@ -14,92 +16,108 @@ n_air  = 1.0
 cld_width = 6
 wvg_widths = [0.28]
 wvg_height = 0.4
-
+wvg_length = 5
 SiO2_width = 6
 SiO2_height = 7.6
-Si_bottom_height = 0.4
 Si_wvg_distance = 4
 
-sim_width  = 8.3
-sim_height = 8.3
-sim_length = 2
-sim_resolution = 16
-sim_bnd_thickness = 0.25
-
-cross_section_size = 7
-
-wavelength = 1.55
-frequency = 1/wavelength
-
-# CROSS SECTION DEFINITION
-cross_section = mp.Volume(
-    center=mp.Vector3(),
-    size=mp.Vector3(cross_section_size,
-                    cross_section_size)
-)
-
-# Define fiber geometry and parameters
+# Fiber parameters
 radius_core = 1.37
 n_core = 1.49836
 n_clad = 1.4447
-geometry_fiber = [
-    mp.Block(
-        size=mp.Vector3(sim_width, sim_height, sim_length),
-        center=mp.Vector3(),
-        material=mp.Medium(epsilon=n_clad**2)
-    ),
+fbr_length = 5
 
-    mp.Cylinder(radius=radius_core, 
-                height=mp.inf, 
-                center=mp.Vector3(),
-                material=mp.Medium(epsilon=n_core**2))
-]
-FiberTE0 = SL.find_mode_from_cross_section(geometry = geometry_fiber, 
-                                           cross_section = cross_section, 
-                                           mode_order=1, 
-                                           frequency=frequency, 
-                                           sim_resolution=sim_resolution)
+# Overall simulation parameters
+sim_width  = 8.5
+sim_height = 8.5
+sim_length = fbr_length + wvg_length
+sim_resolution = 16
+sim_bnd_thickness = 0.3
+
+# Frequency parameters
+wavelength = 1.55
+frequency = 1/wavelength
+
+# =========================
+# SIMULATION LOOP
+# =========================
 
 for wvg_width in wvg_widths:
-    geometry_waveguide = [
+    geometry = [
+        ### Fiber Part ###
+        mp.Block(
+            size=mp.Vector3(sim_width, sim_height, fbr_length),
+            center=mp.Vector3(0, 0, -fbr_length/2),
+            material=mp.Medium(epsilon=n_clad**2)),
 
-    # --- Air background substrate ---
-    mp.Block(
-        size=mp.Vector3(sim_width, sim_height, sim_length),
-        center=mp.Vector3(),
-        material=mp.Medium(epsilon=n_air**2)
-    ),
+        mp.Cylinder(radius=radius_core, 
+                    height=fbr_length, 
+                    center=mp.Vector3(0, 0, -fbr_length/2),
+                    material=mp.Medium(epsilon=n_core**2)),
+        ### Waveguide Part ###
+        # --- Air background substrate ---
+        mp.Block(
+            size=mp.Vector3(sim_width, sim_height, wvg_length),
+            center=mp.Vector3(0, 0, wvg_length/2),
+            material=mp.Medium(epsilon=n_air**2)
+        ),
 
-    # --- Cladding background substrate ---
-    mp.Block(
-        size=mp.Vector3(SiO2_width, SiO2_height, sim_length),
-        center=mp.Vector3(),
-        material=mp.Medium(epsilon=n_SiO2**2)
-    ),
+        # --- Cladding background substrate ---
+        mp.Block(
+            size=mp.Vector3(SiO2_width, SiO2_height, wvg_length),
+            center=mp.Vector3(0, -wvg_height/2, wvg_length/2),
+            material=mp.Medium(epsilon=n_SiO2**2)
+        ),
 
-    # --- Silicon Nitride waveguide ---
-    mp.Block(
-        size=mp.Vector3(wvg_width, wvg_height, sim_length),
-        center=mp.Vector3(0, wvg_height/2),
-        material=mp.Medium(epsilon=n_SiN**2)
-    ),
+        # --- Silicon Nitride waveguide ---
+        mp.Block(
+            size=mp.Vector3(wvg_width, wvg_height, wvg_length),
+            center=mp.Vector3(0, 0, wvg_length/2),
+            material=mp.Medium(epsilon=n_SiN**2)
+        ),
 
-    # --- Silicon bottom substrate ---
-    mp.Block(
-        size=mp.Vector3(sim_width, Si_bottom_height, sim_length),
-        center=mp.Vector3(0, +Si_bottom_height/2 - sim_height / 2),
-        material=mp.Medium(epsilon=n_Si**2)
-    )]
+        # --- Silicon bottom substrate ---
+        mp.Block(
+            size=mp.Vector3(sim_width, wvg_height, wvg_length),
+            center=mp.Vector3(0, - sim_height / 2 + wvg_height/2, wvg_length/2),
+            material=mp.Medium(epsilon=n_Si**2)
+        )]
 
-    # MODE CALCULATION
-    TE0 = SL.find_mode_from_cross_section(
-            geometry = geometry_waveguide, 
-            cross_section = cross_section, 
-            mode_order=1, 
-            frequency=frequency, 
-            sim_resolution=sim_resolution)
+    # Calculate cell_size
+    cell_size, cell_center = SL.compute_geometry_bounds(geometry)
 
-plt.imshow(abs(TE0['Ey']), extent=[-cross_section_size/2, cross_section_size/2, -cross_section_size/2, cross_section_size/2])
+    # Setting up the simulation
+    sim = mp.Simulation(
+        cell_size=cell_size,
+        boundary_layers=[mp.PML(sim_bnd_thickness)],
+        geometry=geometry,
+        default_material=mp.air,
+        resolution=sim_resolution,
+        sources=[
+            mp.EigenModeSource(
+                src=mp.ContinuousSource(frequency=frequency),
+                center=mp.Vector3(0, 0, -fbr_length + sim_bnd_thickness + 1/sim_resolution),  
+                size=mp.Vector3(sim_width-2*sim_bnd_thickness, sim_height-2*sim_bnd_thickness, 0),
+                direction=mp.Z,
+                eig_band=1,
+            )
+        ]
+    )
+
+    # Setting up the dft 
+    dft = sim.add_dft_fields(
+        [mp.Ex, mp.Ey, mp.Ez],
+        frequency, 0, 1,
+        center=cell_center,
+        size=cell_size)
+
+    sim.run(until=10)  
+
+    Ey = sim.get_dft_array(dft, mp.Ey, 0)
+
+z = 90
+plt.imshow(np.abs(Ey[:, :, z]))
 plt.show()
 
-#SL.visualize_geometry(geometry, resolution=sim_resolution)
+# TODO: Visualize Field Propagation from Top
+# TODO: Calculate Coupling Efficiency
