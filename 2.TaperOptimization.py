@@ -16,7 +16,7 @@ n_air  = 1.0
 cld_width = 6
 wvg_widths = [0.28]
 wvg_height = 0.4
-wvg_length = 5
+wvg_length = 20
 SiO2_width = 6
 SiO2_height = 7.6
 Si_wvg_distance = 4
@@ -25,7 +25,7 @@ Si_wvg_distance = 4
 radius_core = 1.37
 n_core = 1.49836
 n_clad = 1.4447
-fbr_length = 5
+fbr_length = 2
 
 # Overall simulation parameters
 sim_width  = 8.5
@@ -95,15 +95,13 @@ for wvg_width in wvg_widths:
         resolution=sim_resolution,
         sources=[
             mp.EigenModeSource(
-                src=mp.ContinuousSource(frequency=frequency),
+                src=mp.ContinuousSource(frequency=frequency, end_time=np.pi*6*frequency),
                 center=mp.Vector3(0, 0, -fbr_length + sim_bnd_thickness + 1/sim_resolution),  
                 size=mp.Vector3(sim_width-2*sim_bnd_thickness, sim_height-2*sim_bnd_thickness, 0),
                 direction=mp.Z,
-                eig_band=1,
-            )
-        ]
+                eig_band=1)]
     )
-
+   
     # Setting up the dft 
     dft = sim.add_dft_fields(
         [mp.Ex, mp.Ey, mp.Ez],
@@ -111,13 +109,12 @@ for wvg_width in wvg_widths:
         center=cell_center,
         size=cell_size)
 
-    sim.run(until=10)  
-
+    sim.run(until=wvg_length * 2)  
+    
+    Ex = sim.get_dft_array(dft, mp.Ex, 0)
     Ey = sim.get_dft_array(dft, mp.Ey, 0)
+    Ez = sim.get_dft_array(dft, mp.Ez, 0)
+    E = np.sqrt(np.abs(Ex)**2 + np.abs(Ey)**2 + np.abs(Ez)**2)
+    SL.visualize_condensated_field(E, propagation_dir='z', wide_dir='x')
 
-z = 90
-plt.imshow(np.abs(Ey[:, :, z]))
-plt.show()
-
-# TODO: Visualize Field Propagation from Top
 # TODO: Calculate Coupling Efficiency
