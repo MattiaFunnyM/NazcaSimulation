@@ -257,7 +257,7 @@ def visualize_condensated_field(Field3D, propagation_dir = 'z', wide_dir = 'x', 
     plt.show()
 
 
-def find_mode_from_cross_section(geometry, cross_section, mode_order, frequency, sim_resolution=32):
+def find_mode_from_cross_section(geometry, cross_section, mode_order, frequency, sim_resolution=32, parity=None):
     """
     Uses meep internal functions to find the mode of given mode_order from
     the provided cross_section. Cross section is taking by compiling the 
@@ -318,7 +318,8 @@ def find_mode_from_cross_section(geometry, cross_section, mode_order, frequency,
         band_num=mode_order,
         where=cross_section,
         kpoint=mp.Vector3(0, 0, 1),
-        eigensolver_tol=1e-4
+        eigensolver_tol=1e-5,
+        parity=mp.NO_PARITY if parity is None else parity
     )
 
     # Extract the field components over the entire cross section
@@ -341,7 +342,7 @@ def find_mode_from_cross_section(geometry, cross_section, mode_order, frequency,
     Hz = np.array([[mode.amplitude(component=mp.Hz, point=mp.Vector3(x, -y, 0)) 
                     for x in x_points] for y in y_points])
     k_value = mode.k[2]
-    neff = k_value / (2 * np.pi * frequency)
+    neff = k_value / frequency
 
     # Create the output dictionary
     output = {
