@@ -61,6 +61,9 @@ sim_height = 12
 sim_resolution = 16
 sim_bnd_thickness = 0.2
 
+silicon_height = (sim_height/2) - wvg_height - SiO2_height/2
+silicon_center_y = - (sim_height/4 + wvg_height/2 + SiO2_height/4)
+
 # Frequency parameters
 wavelength = 1.55
 frequency = 1/wavelength
@@ -123,11 +126,11 @@ for wvg_width in wvg_widths:
             ),
 
             # --- Silicon bottom substrate --- Commented for avoid mode issues
-            #mp.Block(
-            #    size=mp.Vector3(sim_width, wvg_height, wvg_length_mode),
-            #    center=mp.Vector3(0, - sim_height / 2 + wvg_height/2),
-            #    material=mp.Medium(epsilon=n_Si**2)
-            #)
+            mp.Block(
+                size=mp.Vector3(sim_width, silicon_height, wvg_length_mode),
+                center=mp.Vector3(0, silicon_center_y),
+                material=mp.Medium(epsilon=n_Si**2)
+            )
             ]
 
     cross_section = mp.Volume(
