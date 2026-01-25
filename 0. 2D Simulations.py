@@ -1,6 +1,6 @@
 from matplotlib.widgets import Button
 import matplotlib.pyplot as plt
-import SimLibrary as SL
+import Library.Simulation2D as SL
 import numpy as np
 import meep as mp
 import json 
@@ -12,7 +12,7 @@ propagation_waveguide = True
 propagation_coupler = True
 propagation_mmi = True
 propagation_taper = True
-propagation_curve = False
+propagation_curve = True
 
 #################################################################
 ###  1 - Find waveguide width for single mode in wanted range ###
@@ -496,8 +496,7 @@ if not propagation_mmi:
                                 mp.Vector3(-mmi_length / 2, wvg_input_mmi_width/2),
                                 mp.Vector3(-mmi_length / 2 - wvg_length, wvg_width/2)],
                                 height=mp.inf, 
-                                material=mp.Medium(epsilon=wvg_neff**2)
-                        ),
+                                material=mp.Medium(epsilon=wvg_neff**2)),
 
                         # Top Output Taper (replaces one output waveguide Block)
                         mp.Prism(
@@ -507,8 +506,7 @@ if not propagation_mmi:
                                 mp.Vector3(mmi_length / 2 + wvg_length, mmi_output_shift + wvg_width/2),
                                 mp.Vector3(mmi_length / 2, mmi_output_shift + wvg_input_mmi_width/2)],
                                 height=mp.inf,
-                                material=mp.Medium(epsilon=wvg_neff**2)
-                        ),
+                                material=mp.Medium(epsilon=wvg_neff**2)),
 
                         # Bottom Output Taper (replaces the other output waveguide Block)
                         mp.Prism(
@@ -518,8 +516,7 @@ if not propagation_mmi:
                                 mp.Vector3(mmi_length / 2 + wvg_length, -mmi_output_shift + wvg_width/2),
                                 mp.Vector3(mmi_length / 2, -mmi_output_shift + wvg_input_mmi_width/2)],
                                 height=mp.inf,
-                                material=mp.Medium(epsilon=wvg_neff**2)
-                        ),
+                                material=mp.Medium(epsilon=wvg_neff**2)),
 
                         # MMI part
                         mp.Block(size=mp.Vector3(mmi_length, mmi_width, 0),
