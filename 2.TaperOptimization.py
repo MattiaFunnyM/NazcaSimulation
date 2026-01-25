@@ -1,34 +1,7 @@
 import numpy as np
 import meep as mp
-import SimLibrary as SL
+import Library.Simulation3D as SL
 import matplotlib.pyplot as plt
-
-def calculate_overlap(E1, E2):
-    """
-    Calculate normalized modal overlap between two field E1 and E2.
-
-    E1: complex arrays (Nx, Ny)
-    E2: complex arrays (Nx, Ny)
-    
-    Returns
-    -------
-    overlap_z : float value 
-        Normalized overlap result between E1 and E2
-    """
-
-    # Integrate over x,y 
-    overlap_int = np.sum((E1 * np.conj(E2)))
-
-    # Norm of E1
-    norm1 = np.sum(np.abs(E1)**2)
-
-    # Norm of E2
-    norm2 = np.sum(np.abs(E2)**2)
-
-    # Normalized overlap vs z
-    overlap_z = np.abs(overlap_int)**2 / (norm1 * norm2)
-
-    return np.round(overlap_z * 100, 2)
 
 # =========================
 # USER PARAMETERS
@@ -121,8 +94,8 @@ for wvg_width in wvg_widths:
             parity=mp.EVEN_Y)
 
     # Calculate the overlap for TE light
-    overlap_x = calculate_overlap(Fiber_mode['Ex'], 
-                                    mode['Ex'])
+    overlap_x = SL.calculate_overlap(Fiber_mode['Ex'], 
+                                     mode['Ex'])
     overlaps_TE.append(overlap_x)
 
     # Calculate the TM mode from the given geometry
@@ -135,8 +108,8 @@ for wvg_width in wvg_widths:
             parity=mp.ODD_Y)
 
     # Calculate the overlap for TM ligth
-    overlap_y = calculate_overlap(Fiber_mode['Ey'], 
-                                    mode['Ey'])
+    overlap_y = SL.calculate_overlap(Fiber_mode['Ey'], 
+                                     mode['Ey'])
     overlaps_TM.append(overlap_y)
 
 # Plot the result

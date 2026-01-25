@@ -1,6 +1,6 @@
 import numpy as np
 import meep as mp
-import SimLibrary as SL
+import Library.Simulation3D as SL
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from matplotlib.widgets import RadioButtons
