@@ -9,23 +9,129 @@
 # - Waveguide VER 15 um under 4 min
 # - Coupler 2x2 50 um under 10 min
 # - Ring resonator 100 um under 10 min
+import json
+import socket
+import random
+import matplotlib.pyplot as plt
+from matplotlib.patches import Polygon
 
+# Assign a random color to each layer
+layer_colors = {}
+
+def get_color_for_layer(layer_key):
+    if layer_key not in layer_colors:
+        layer_colors[layer_key] = (
+            random.random(),
+            random.random(),
+            random.random()
+        )
+    return layer_colors[layer_key]
+
+# Prepare the server
+HOST = "127.0.0.1"
+PORT = 50007
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.bind((HOST, PORT))
+sock.listen(1)
+print("Server ready")
+
+# Server is listening for a new package of data
+while True:
+    conn, addr = sock.accept()
+    data = conn.recv(100000).decode()
+    conn.close()
+
+    if not data:
+        continue
+
+    print("Received data block")
+
+    # Parse JSON
+    try:
+        payload = json.loads(data)
+    except Exception as e:
+        print("JSON error:", e)
+        continue
+
+    polygons = payload.get("polygons", [])
+    if not polygons:
+        print("No polygons received")
+        continue
+
+    # Create a new figure
+    plt.figure(figsize=(8, 8))
+    ax = plt.gca()
+
+    # Plot each polygon
+    for poly in polygons:
+        layer = poly["layer"]
+        pts = poly["points"]
+ 
+        layer_key = f"{layer['layer']}/{layer['datatype']}"
+        color = get_color_for_layer(layer_key)
+
+        patch = Polygon(pts, closed=True, facecolor=color, edgecolor="black", alpha=0.6)
+        ax.add_patch(patch)
+
+    # Rescale property
+    all_x = []
+    all_y = []
+    for poly in polygons:
+        for x, y in poly["points"]:
+            all_x.append(x)
+            all_y.append(y)
+
+    # Add a small margin
+    margin = 1.0
+
+    xmin, xmax = min(all_x) - margin, max(all_x) + margin
+    ymin, ymax = min(all_y) - margin, max(all_y) + margin
+
+    ax.set_xlim(xmin, xmax)
+    ax.set_ylim(ymin, ymax)
+
+    plt.title("KLayout Selection Plot")
+    plt.xlabel("Microns")
+    plt.ylabel("Microns")
+    plt.grid(True)
+
+    plt.show()
+
+"""
+# This is the script from Klayout part
 import pya
+import socket
+import json
 
+# ------------------------------------------------------------
+# Send data to external Python plotter
+# ------------------------------------------------------------
+def send_to_plotter(payload_dict):
+    try:
+        payload = json.dumps(payload_dict)
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect(("127.0.0.1", 50007))
+        s.send(payload.encode())
+        s.close()
+        pya.Logger.info("Data sent to external plotter.")
+    except Exception as e:
+        pya.Logger.error(f"Failed to send data: {e}")
+
+
+# ------------------------------------------------------------
+# Collect ruler region (user-drawn box)
+# ------------------------------------------------------------
 def get_ruler_region_in_dbu(view, layout):
-    """Collect box rulers and return them as a pya.Region in DBU."""
     region = pya.Region()
-
-    dbu = layout.dbu  # microns per database unit (µm/DBU)
+    dbu = layout.dbu  # microns per DBU
 
     for ann in view.each_annotation():
         try:
-            dbox = ann.box()  # This is a pya.DBox (in micron units)
+            dbox = ann.box()  # pya.DBox in microns
         except Exception:
             dbox = None
 
         if dbox is not None and not dbox.empty():
-            # Convert DBox (µm) → Box (DBU)
             box = pya.Box(
                 int(dbox.left / dbu),
                 int(dbox.bottom / dbu),
@@ -37,54 +143,50 @@ def get_ruler_region_in_dbu(view, layout):
     return region
 
 
+# ------------------------------------------------------------
+# Main logic
+# ------------------------------------------------------------
 def main():
-    # Get the current layout view
     view = pya.LayoutView.current()
     if view is None:
         pya.Logger.info("No layout open.")
         return
 
-    # Get the active cell view
     cellview = view.active_cellview()
     if cellview is None:
         pya.Logger.info("No active cell view.")
         return
 
-    # Get the layout and the top cell (the root of the hierarchy)
     layout = cellview.layout()
     top_cell = cellview.cell
-
     if top_cell is None:
         pya.Logger.info("No top cell found.")
         return
 
-    # Get the ruler-defined region in DBU
+    dbu = layout.dbu
+
+    # Get ruler box region
     selection_region = get_ruler_region_in_dbu(view, layout)
-
     if selection_region.is_empty():
-        pya.Logger.info("No ruler box found. Draw a box using the ruler tool first.")
+        pya.Logger.info("No ruler box found.")
+        return
 
-    # Get the bounding box of the selection region in DBU
     bbox_dbu = selection_region.bbox()
-
-    # Print the ruler selection box in microns for clarity
-    dbu = layout.dbu  # microns per DBU
     bbox_micron = pya.DBox(bbox_dbu) * dbu
-    pya.Logger.info(f"Ruler selection bounding box (microns): {bbox_micron}")
+    pya.Logger.info(f"Selection box (microns): {bbox_micron}")
 
-    # Iterate through shapes overlapping the bounding box in DBU
+    all_polygons = []
+
+    # Iterate through all layers
     for layer_index in layout.layer_indexes():
         layer_info = layout.get_info(layer_index)
 
-        # Create an iterator for shapes overlapping the ruler-defined region
         it = top_cell.begin_shapes_rec_overlapping(layer_index, bbox_dbu)
 
-        found = False
         while not it.at_end():
             shape = it.shape()
-            trans = it.trans()  # Get the transformation to the top-level coordinate space
+            trans = it.trans()
 
-            # Convert the shape into a region that represents its actual geometry
             shape_region_local = pya.Region()
 
             if shape.is_box():
@@ -93,27 +195,44 @@ def main():
                 shape_region_local.insert(shape.polygon)
             else:
                 it.next()
-                continue 
+                continue
 
-            # Apply the transformation to bring the shape region into top-level coordinates
+            # Transform to top-level coordinates
             shape_region_top = shape_region_local.transformed(trans)
 
-            # Compute the intersection between the shape's full region and the ruler selection box (DBU)
+            # Intersect with ruler region
             shape_intersection = shape_region_top & selection_region
 
-            # Only consider shapes that actually overlap (non-empty intersection)
             if not shape_intersection.is_empty():
-                found = True
-
-                # Print the intersection (the "cut" portion) in microns
-                for poly in shape_intersection.each():
-                    pya.Logger.info(f"Layer {layer_info}: Intersection polygon (microns) {poly}")
+              for poly in shape_intersection.each():
+                pts = []
+            
+                # Convert Region polygon → SimplePolygon
+                polygon = poly.to_simple_polygon()
+            
+                for p in polygon.each_point():
+                    pts.append([p.x * dbu, p.y * dbu])
+            
+                all_polygons.append({
+                    "layer": {
+                        "layer": layer_info.layer,
+                        "datatype": layer_info.datatype
+                    },
+                    "points": pts
+                })
 
             it.next()
 
-        if not found:
-            pya.Logger.info(f"Layer {layer_info}: No overlapping shapes or intersections")
+    # Send to external plotter
+    if all_polygons:
+        send_to_plotter({"polygons": all_polygons})
+    else:
+        pya.Logger.info("No polygons found in selection.")
 
 
+# ------------------------------------------------------------
+# Run
+# ------------------------------------------------------------
 if __name__ == "__main__":
     main()
+"""
