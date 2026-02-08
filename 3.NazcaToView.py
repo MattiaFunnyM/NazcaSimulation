@@ -13,10 +13,11 @@
 import sys
 import json
 import socket
-import random
 import threading
-import matplotlib.pyplot as plt
-from matplotlib.patches import Polygon
+import numpy as np
+import pyvista as pv
+from shapely.ops import unary_union, triangulate
+from shapely.geometry import Polygon
 
 #############################
 ### PLOTTING INFORMATIONS ###
@@ -29,56 +30,125 @@ with open("TechnologyExample.json", "r") as f:
 # Take the information of the colors
 tech_layers = tech["layers"]
 
-# Function used for plotting
-def plot_data(polygons):
-   
-    # Configure the plotting
-    plt.figure(figsize=(8, 8))
-    ax = plt.gca()
+def merge_polygons_by_layer(polygons):
+    layer_groups = {}
 
-    # Plot each polygon independently
     for poly in polygons:
-        # Get the layer of the polygon
         layer = poly["layer"]
         layer_key = f"{layer['layer']}/{layer['datatype']}"
-        
-        # Skip layers not in the technology
+
+        pts = poly["points"]
+        shp = Polygon(pts)
+
+        if layer_key not in layer_groups:
+            layer_groups[layer_key] = []
+        layer_groups[layer_key].append(shp)
+
+    # Merge touching polygons
+    merged = {}
+    for layer_key, polys in layer_groups.items():
+        merged[layer_key] = unary_union(polys)
+
+    return merged
+
+def shapely_to_mesh(shp, bottom, height):
+    meshes = []
+
+    if shp.geom_type == "Polygon":
+        meshes.append(extrude_polygon(list(shp.exterior.coords), bottom, height))
+
+    elif shp.geom_type == "MultiPolygon":
+        for geom in shp.geoms:
+            meshes.append(extrude_polygon(list(geom.exterior.coords), bottom, height))
+
+    return meshes
+
+
+def extrude_polygon(pts, bottom, height):
+    pts = np.array(pts[:-1])
+    n = len(pts)
+
+    # 3D points
+    bottom_pts = np.c_[pts, np.full(n, bottom)]
+    top_pts    = np.c_[pts, np.full(n, bottom + height)]
+
+    all_pts = np.vstack([bottom_pts, top_pts])
+
+    faces = []
+
+    # ---- SIDE FACES (unchanged) ----
+    for i in range(n):
+        j = (i + 1) % n
+        faces.append([
+            4,
+            i,
+            j,
+            n + j,
+            n + i
+        ])
+
+    # ---- TRIANGULATED BOTTOM & TOP ----
+    poly2d = Polygon(pts)
+    tris = triangulate(poly2d)
+    
+    for tri in tris:
+        if not poly2d.contains(tri.centroid):
+            continue
+
+        tri_pts = np.array(tri.exterior.coords)[:-1]
+
+        idx = []
+        for p in tri_pts:
+            idx.append(np.where((pts == p).all(axis=1))[0][0])
+
+        # bottom (CCW)
+        faces.append([3, idx[0], idx[1], idx[2]])
+
+        # top (reverse winding)
+        faces.append([3, n + idx[2], n + idx[1], n + idx[0]])
+
+    return pv.PolyData(all_pts, np.hstack(faces))
+
+
+def plot_data(polygons):
+    plotter = pv.Plotter(window_size=(1200, 800))
+    used_layers = {}
+
+    # Merge polygons per layer
+    merged = merge_polygons_by_layer(polygons)
+
+    for layer_key, shp in merged.items():
         if layer_key not in tech_layers:
             continue
-        
-        # Take information from the technology file
-        layer_info = tech_layers[layer_key]
-        color = layer_info["color"]
-        height = layer_info["height"]  
 
-        # Plot the polygons
-        pts = poly["points"]
-        patch = Polygon(pts, closed=True, facecolor=color,
-                        edgecolor="black", alpha=0.6)
-        ax.add_patch(patch)
+        info = tech_layers[layer_key]
+        color = info["color"]
+        bottom = info["bottom"]
+        height = info["height"]
+        alpha = info.get("alpha", 0.6)
 
-    margin = 1
-    all_x = [x for poly in polygons for x, _ in poly["points"]]
-    all_y = [y for poly in polygons for _, y in poly["points"]]
-    if all_x or all_y:
-        ax.set_xlim(min(all_x)-margin, max(all_x)+margin)
-        ax.set_ylim(min(all_y)-margin, max(all_y)+margin)
+        # Convert merged Shapely polygon(s) to PyVista meshes
+        meshes = shapely_to_mesh(shp, bottom, height)
 
-    plt.title("2D Selection Plot")
-    plt.xlabel("µm")
-    plt.ylabel("µm")
-    plt.grid(True)
-    plt.show()
-    return
+        for mesh in meshes:
+            plotter.add_mesh(mesh, color=color, opacity=alpha, show_edges=False)
 
-###########################
-### SERVER INFORMATIONS ###
-###########################
+        used_layers[layer_key] = info
 
-# Status of the server
-running = True
+    # Legend
+    legend_entries = []
+    for key, info in used_layers.items():
+        name = info.get("name", key)
+        legend_entries.append([name, info["color"]])
 
-# Function to call for shutting down the server
+    if legend_entries:
+        plotter.add_legend(legend_entries, bcolor="white")
+
+    plotter.show()
+
+# -----------------------------
+# Helper functions
+# -----------------------------
 def keyboard_listener():
     global running
     print("Press 'quit' + Enter to stop the server.")
@@ -88,48 +158,64 @@ def keyboard_listener():
             running = False
             break
 
-# Start the thread
+def recv_exact(conn, n):
+    data = b""
+    while len(data) < n:
+        chunk = conn.recv(n - len(data))
+        if not chunk:
+            raise ConnectionError("Connection closed before receiving full message")
+        data += chunk
+    return data
+
+# -----------------------------
+# Server setup
+# -----------------------------
+running = True
 threading.Thread(target=keyboard_listener, daemon=True).start()
 
-# Server setup
 HOST = "127.0.0.1"
 PORT = 50007
+
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 sock.bind((HOST, PORT))
 sock.listen(1)
 print("Server ready")
 
-# Loop run for the server
+# -----------------------------
+# Main server loop
+# -----------------------------
 try:
     while running:
         try:
-            # Information for connections
-            sock.settimeout(1.0)  
+            sock.settimeout(1.0)
             conn, addr = sock.accept()
-            data = conn.recv(100000).decode()
+
+            # ---- Read 4‑byte length prefix ----
+            length_bytes = recv_exact(conn, 4)
+            msg_len = int.from_bytes(length_bytes, "big")
+
+            # ---- Read the full JSON payload ----
+            data = recv_exact(conn, msg_len).decode()
             conn.close()
 
-            # If no data is received continue the loop
             if not data:
                 continue
-            
-            # If there are data load them
+
+            # Parse JSON
             payload = json.loads(data)
             polygons = payload.get("polygons", [])
             if not polygons:
                 continue
-            
-            # And plot them
+
+            # Plot
             plot_data(polygons)
             print("Data plotted.")
-          
-        # If there are exceptions, they do not stop the server
+
         except socket.timeout:
             continue
         except Exception as e:
             print("Error:", e)
 
-# Exit if the quit combination is pressed
 finally:
     sock.close()
     print("Server stopped.")
@@ -145,11 +231,16 @@ import json
 # ------------------------------------------------------------
 def send_to_plotter(payload_dict):
     try:
-        payload = json.dumps(payload_dict)
+        payload = json.dumps(payload_dict).encode()
+
+        # Prefix with 4‑byte length
+        msg = len(payload).to_bytes(4, "big") + payload
+
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect(("127.0.0.1", 50007))
-        s.send(payload.encode())
+        s.sendall(msg)
         s.close()
+
         pya.Logger.info("Data sent to external plotter.")
     except Exception as e:
         pya.Logger.error(f"Failed to send data: {e}")
