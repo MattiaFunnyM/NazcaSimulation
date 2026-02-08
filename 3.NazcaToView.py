@@ -1,6 +1,7 @@
-# TODO: Select a rectangle in a GDS
-# TODO: Transform the selection region in refractive index block
-# TODO: Visualize refractive index block
+# TODO: Visualize refractive index block 
+    #: Make the plot 3D
+    #: Make the plot looking good
+ 
 # TODO: Simulation (entire block together)
 # TODO: Present results
 # TODO: Simulation (divide the simulation)
@@ -9,25 +10,88 @@
 # - Waveguide VER 15 um under 4 min
 # - Coupler 2x2 50 um under 10 min
 # - Ring resonator 100 um under 10 min
+import sys
 import json
 import socket
 import random
+import threading
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
 
-# Assign a random color to each layer
-layer_colors = {}
+#############################
+### PLOTTING INFORMATIONS ###
+#############################
 
-def get_color_for_layer(layer_key):
-    if layer_key not in layer_colors:
-        layer_colors[layer_key] = (
-            random.random(),
-            random.random(),
-            random.random()
-        )
-    return layer_colors[layer_key]
+# Open the Technology File
+with open("TechnologyExample.json", "r") as f:
+    tech = json.load(f)
 
-# Prepare the server
+# Take the information of the colors
+tech_layers = tech["layers"]
+
+# Function used for plotting
+def plot_data(polygons):
+   
+    # Configure the plotting
+    plt.figure(figsize=(8, 8))
+    ax = plt.gca()
+
+    # Plot each polygon independently
+    for poly in polygons:
+        # Get the layer of the polygon
+        layer = poly["layer"]
+        layer_key = f"{layer['layer']}/{layer['datatype']}"
+        
+        # Skip layers not in the technology
+        if layer_key not in tech_layers:
+            continue
+        
+        # Take information from the technology file
+        layer_info = tech_layers[layer_key]
+        color = layer_info["color"]
+        height = layer_info["height"]  
+
+        # Plot the polygons
+        pts = poly["points"]
+        patch = Polygon(pts, closed=True, facecolor=color,
+                        edgecolor="black", alpha=0.6)
+        ax.add_patch(patch)
+
+    margin = 1
+    all_x = [x for poly in polygons for x, _ in poly["points"]]
+    all_y = [y for poly in polygons for _, y in poly["points"]]
+    if all_x or all_y:
+        ax.set_xlim(min(all_x)-margin, max(all_x)+margin)
+        ax.set_ylim(min(all_y)-margin, max(all_y)+margin)
+
+    plt.title("2D Selection Plot")
+    plt.xlabel("µm")
+    plt.ylabel("µm")
+    plt.grid(True)
+    plt.show()
+    return
+
+###########################
+### SERVER INFORMATIONS ###
+###########################
+
+# Status of the server
+running = True
+
+# Function to call for shutting down the server
+def keyboard_listener():
+    global running
+    print("Press 'quit' + Enter to stop the server.")
+    for line in sys.stdin:
+        if line.strip().lower() == "quit":
+            print("Shutdown command received.")
+            running = False
+            break
+
+# Start the thread
+threading.Thread(target=keyboard_listener, daemon=True).start()
+
+# Server setup
 HOST = "127.0.0.1"
 PORT = 50007
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -35,67 +99,40 @@ sock.bind((HOST, PORT))
 sock.listen(1)
 print("Server ready")
 
-# Server is listening for a new package of data
-while True:
-    conn, addr = sock.accept()
-    data = conn.recv(100000).decode()
-    conn.close()
+# Loop run for the server
+try:
+    while running:
+        try:
+            # Information for connections
+            sock.settimeout(1.0)  
+            conn, addr = sock.accept()
+            data = conn.recv(100000).decode()
+            conn.close()
 
-    if not data:
-        continue
+            # If no data is received continue the loop
+            if not data:
+                continue
+            
+            # If there are data load them
+            payload = json.loads(data)
+            polygons = payload.get("polygons", [])
+            if not polygons:
+                continue
+            
+            # And plot them
+            plot_data(polygons)
+            print("Data plotted.")
+          
+        # If there are exceptions, they do not stop the server
+        except socket.timeout:
+            continue
+        except Exception as e:
+            print("Error:", e)
 
-    print("Received data block")
-
-    # Parse JSON
-    try:
-        payload = json.loads(data)
-    except Exception as e:
-        print("JSON error:", e)
-        continue
-
-    polygons = payload.get("polygons", [])
-    if not polygons:
-        print("No polygons received")
-        continue
-
-    # Create a new figure
-    plt.figure(figsize=(8, 8))
-    ax = plt.gca()
-
-    # Plot each polygon
-    for poly in polygons:
-        layer = poly["layer"]
-        pts = poly["points"]
- 
-        layer_key = f"{layer['layer']}/{layer['datatype']}"
-        color = get_color_for_layer(layer_key)
-
-        patch = Polygon(pts, closed=True, facecolor=color, edgecolor="black", alpha=0.6)
-        ax.add_patch(patch)
-
-    # Rescale property
-    all_x = []
-    all_y = []
-    for poly in polygons:
-        for x, y in poly["points"]:
-            all_x.append(x)
-            all_y.append(y)
-
-    # Add a small margin
-    margin = 1.0
-
-    xmin, xmax = min(all_x) - margin, max(all_x) + margin
-    ymin, ymax = min(all_y) - margin, max(all_y) + margin
-
-    ax.set_xlim(xmin, xmax)
-    ax.set_ylim(ymin, ymax)
-
-    plt.title("KLayout Selection Plot")
-    plt.xlabel("Microns")
-    plt.ylabel("Microns")
-    plt.grid(True)
-
-    plt.show()
+# Exit if the quit combination is pressed
+finally:
+    sock.close()
+    print("Server stopped.")
 
 """
 # This is the script from Klayout part
